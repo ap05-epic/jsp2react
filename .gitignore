@@ -15,3 +15,7 @@ __pycache__/
 *.pyc
 .DS_Store
 Thumbs.db
+
+# Local-only pod-run notes — reference internal app source files/paths; kept OUT of the public repo.
+# Their sanitized, reusable lessons live in skills/legacy-crawl-capture/references/runtime-readiness-and-auth.md
+Feedback/

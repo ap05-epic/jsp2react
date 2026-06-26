@@ -22,12 +22,16 @@ name: jsp2react-analyzer
 ```text
 READ STATUS.md — or CREATE & SEED it from the kickoff prompt + repo discovery if absent/unconfigured (§2)
   -> OBTAIN auth_state.json by invoking the login skill (never implement login yourself)
+  -> TRIAGE (once): app reachable? auth end-to-end? canonical post-login route valid? assets 200?
+       one data-heavy page actually hydrates? — fix/record before mass capture (§3.5)
   -> CRAWL: enumerate EVERY screen (crawl_screens.py: struts-config + JSP scan + live menu traversal)
   -> for each screen, for each visible STATE:
-       CAPTURE evidence (capture_screen.py: png + model + a11y + network) — ONE state at a time
+       WRITE a capture profile (canonical route + readiness contract), then
+       CAPTURE evidence (capture_screen.py --profile: png + model + a11y + network + .capture.json)
+       — ONE state at a time; a capture counts only when its sidecar says usable:true
   -> READ JSP/Struts source -> map endpoints + data contracts (3 layers; CICS note for mainframe)
   -> GENERATE fixtures (capture_fixtures.py) so the replica can render with no backend
-  -> WRITE spec.md (evidence-tagged), SEED STATUS.md, UPDATE MANIFEST.json
+  -> WRITE spec.md (evidence-tagged, incl. per-screen capture contract), SEED STATUS.md, UPDATE MANIFEST.json
   -> RECONCILE: every JSP/action + every artifact accounted for; coverage matrix updated
 ```
 
@@ -64,6 +68,26 @@ Per STATUS.md §3, obtain a reusable session:
 Reuse the saved `auth_state.json` on every capture (`--auth-state`). If the session expired
 (login redirects reappear), re-run the login step, note it in STATUS.md §7, and continue.
 
+## 3.5 Pre-capture triage (gate — run ONCE before any mass capture)
+
+A page that "rendered" is not automatically valid evidence. Before crawling/capturing the app, confirm
+it is actually capture-ready — otherwise you risk a folder of confident-wrong PNGs (unstyled pages,
+error routes behind misleading `.do` links, screens captured before async data hydrated). Confirm in order:
+
+1. **Login page reachable** (e.g. `…/jsp/login.jsp` → 200 + form).
+2. **Auth works end-to-end** — the real login form lands on the authenticated app; `auth_state.json` saved.
+3. **Canonical post-login route valid** — you can reach an authenticated dispatcher route *after* login,
+   not a standalone error page (§5 records canonical vs misleading routes).
+4. **Assets return 200** — main stylesheet(s)/scripts load (no 404 on `theme/`, `platform/styleSheets/`).
+   `capture_screen.py` tracks per-asset status; a styled-vs-unstyled warning here is a real failure.
+5. **One data-heavy page actually hydrates** — pick a representative detail screen; confirm its
+   backend-driven content appears (not just the page chrome).
+
+If any step fails, **fix it or record the blocker before mass capture** — including source-backed
+debugging when the cause is app runtime logic, not browser automation (§9). The full runbook (localhost/
+non-SSO gotchas, timing calibration, styled detection) is `legacy-crawl-capture/references/runtime-
+readiness-and-auth.md` — read it before your first capture.
+
 ## 4. Crawl — discover EVERY screen
 
 1. **Static inventory first (authoritative).**
@@ -81,14 +105,35 @@ Reuse the saved `auth_state.json` on every capture (`--auth-state`). If the sess
 
 ## 5. Capture — objective evidence, one state at a time
 
-For each (screen, state): `capture_screen.py --url <…> --name <id_state> --auth-state <…> --viewport <STATUS viewport> [--wait-for/--wait-ms] [--workflow steps.json]`.
-- Reach deep states with `--workflow` (navigate/click/fill/select/wait) — same vocabulary as
+**Write a capture profile per (screen, state), then capture from it.** The profile
+(`templates/capture-profile.json` schema) is the per-screen *capture contract*: canonical route,
+required auth context, viewport, readiness selectors/text, spinner-gone selector, settle timing,
+expected assets, and known failure modes. Capture with it:
+`capture_screen.py --profile profiles/<id_state>.json --name <id_state> --auth-state <…>`.
+The builder later reuses the **same profile** to capture the React side — identical contract → comparable
+captures. This is non-negotiable for a trustworthy diff.
+
+- **Semantic readiness, not blind sleeps.** Configure readiness in order: `waitFor` selector →
+  `mustContain` text markers (the strongest "real backend data arrived" signal) → `waitForGone`
+  spinner/mask → fonts ready → a **small** `waitMs` final settle. A screen that needs a long blind sleep
+  to look right has a readiness signal you haven't found yet — find the selector/text instead.
+- **A capture counts only when `usable:true`.** `capture_screen.py` writes a `<name>.capture.json`
+  sidecar; `usable` is true only when every readiness check passed and no expected asset failed. A
+  `usable:false` capture (failed readiness, or unstyled/asset-404 page) is **not** admissible evidence —
+  fix and recapture, don't record it as the screen.
+- **Record the canonical route — and the misleading ones.** In the profile and spec.md, note how to
+  legitimately reach the authenticated state (real login → dispatcher route), and which routes look right
+  but aren't (e.g. a direct `*.do` that shows a standalone error page). Routes that only work after a
+  workflow step (login submit, quick-search) go in the profile's `workflow`, not as a bare URL.
+- Reach deep states with the profile's `workflow` (navigate/click/fill/select/wait) — same vocabulary as
   webapp-snapshot's workflow JSON.
-- Capture the **steady state** (loaders gone, fonts settled) so the screenshot is parity-friendly.
-- Prove a family's runtime path manually once, then repeat captures across that family.
+- Prove a family's runtime path manually once, then repeat captures across that family with reused profiles.
 - Record artifacts under the evidence root and add them to MANIFEST.json. The normalized `model.json` is
   the structural source of truth the builder will diff against — capturing legacy and (later) React with
-  this same script is what makes parity valid.
+  this same script + profile is what makes parity valid.
+
+See `legacy-crawl-capture/references/runtime-readiness-and-auth.md` for the readiness rationale, timing
+calibration, and canonical-vs-misleading route rule.
 
 ## 6. Map endpoints & data contracts (read the source)
 
@@ -110,8 +155,13 @@ endpoint paths are preserved, so live data-wiring QA stays possible later.
 
 - **spec.md** (template in `templates/spec.md`): Section 1 context once; a per-screen section per row with
   enumerated states, the 1:1 layout/control inventory (copy, labels, field order, tab order, columns),
-  endpoints/data contract, assets to reuse, and success criteria. **Tag every visible requirement with
-  evidence** (`[SHOT]`,`[DOM]`,`[CSS]`,`[JSP]`,`[ACTION]`,`[ENDPOINT]`,`[MSG]`,`[ASSET]`,`[INFERRED]`).
+  endpoints/data contract, assets to reuse, the **capture contract** (canonical route, auth context,
+  readiness selectors/text, settle timing, expected markers, known failure modes — mirrors the screen's
+  capture profile), and success criteria. **Tag every visible requirement with evidence**
+  (`[SHOT]`,`[DOM]`,`[CSS]`,`[JSP]`,`[ACTION]`,`[ENDPOINT]`,`[MSG]`,`[ASSET]`,`[INFERRED]`).
+- **capture profiles** (`profiles/<id_state>.json`, schema `templates/capture-profile.json`): one per
+  screen/state — the machine-readable capture contract `capture_screen.py --profile` consumes and the
+  builder reuses for the React capture. Listed in MANIFEST.json alongside the evidence.
 - **STATUS.md** (template `templates/STATUS.md`): seed §1–§3 config, §4 screen inventory (one row per
   screen/state, status `analyzed`), §5 coverage matrix, §6 first recommended build slice.
 - **MANIFEST.json**: every captured artifact recorded (auto-traceability; replaces hand-listing).
@@ -123,9 +173,15 @@ endpoint paths are preserved, so live data-wiring QA stays possible later.
 
 - **Recover before declaring a blocker.** If a screen/tab/control won't load: wait longer for hydration;
   confirm DOM readiness; retry in the same session; return to the real parent shell and re-traverse;
-  re-establish context (e.g. FA/search) and retry; try a different parent-state order; inspect the
-  source/routing to explain the failure; capture the failed artifact and move on. Only stop a screen when
-  meaningful options are exhausted — then classify it in STATUS.md §7 with the attempts.
+  re-establish context (e.g. FA/search) and retry; try a different parent-state order; capture the failed
+  artifact and move on. Only stop a screen when meaningful options are exhausted.
+- **Source-backed debugging before `blocked`.** When capture repeatedly fails for the same screen, the
+  cause is often **app runtime logic**, not browser automation — investigate the source before giving up:
+  inspect session/auth code (e.g. `BaseAction`, `DispatcherAction`, login filters), identify
+  localhost-only assumptions (platform/GCS cookie checks), trace a broken post-login route to the action
+  that rejects it. Declare `blocked` only after this pass, and record in STATUS.md §7 *what* in the runtime
+  is broken (**file + reason**, e.g. "BaseAction.checkUserInSession forces platform-GCS timeout on
+  localhost") plus the attempts — so a human can patch it, not just "capture failed."
 - **Continue autonomously while reachable screens remain.** Do not ask "should I keep going?" if untouched
   families, un-captured states, or coarse rows remain. Ask only when: credentials/login invalid, QA
   unreachable, entitlements block multiple families, or priorities genuinely conflict.
@@ -161,11 +217,13 @@ When the coverage matrix targets are met (or the requested scope is captured and
 ```text
 1. READ STATUS.md, or CREATE+SEED it      -> from kickoff prompt (URL,login) + discovery + defaults (§2)
 2. login skill -> auth_state.json         -> reusable session (don't implement login)
-3. crawl_screens.py                       -> full screen inventory (reconcile baseline)
-4. traverse families live; enumerate states
-5. capture_screen.py per state            -> png + model + network (one at a time)
-6. read JSP/Struts -> endpoints/contracts -> 3 layers; tag evidence
-7. capture_fixtures.py                     -> MSW fixtures (render without backend)
-8. write spec.md + seed STATUS.md + MANIFEST; RECONCILE
-9. update coverage matrix; classify blockers; continue while reachable
+3. TRIAGE (once)                          -> reachable? auth e2e? canonical route? assets 200? hydrates? (§3.5)
+4. crawl_screens.py                       -> full screen inventory (reconcile baseline)
+5. traverse families live; enumerate states
+6. write capture profile per state        -> canonical route + readiness contract (templates/capture-profile.json)
+7. capture_screen.py --profile per state  -> png + model + network + .capture.json (usable? one at a time)
+8. read JSP/Struts -> endpoints/contracts -> 3 layers; tag evidence
+9. capture_fixtures.py                     -> MSW fixtures (render without backend)
+10. write spec.md (+capture contract) + seed STATUS.md + MANIFEST; RECONCILE
+11. update coverage matrix; source-backed debug; classify blockers; continue while reachable
 ```

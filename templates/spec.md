@@ -52,6 +52,14 @@ HTML/CSS port via CSS Modules; no component library. MSW serves captured fixture
 
 - **Description.** <what it is / what the user does here>
 - **Reach path.** <exact runtime steps to navigate here from the summary shell, incl. waits/context>
+- **Capture contract** (mirrors `profiles/<id_state>.json`; the builder reuses it to capture React):
+  - canonical route: `<dispatcherAction.do?page=…&fanum=…>` (works only with a live session)
+  - misleading routes (NOT verification targets): `<e.g. direct loginAction.do → error page>`
+  - auth context: <pre-auth | authenticated via login-form submit; reuse auth_state.json> · viewport: `1920x1080`
+  - readiness: waitFor `<#anchor>` · mustContain `<"Compensation","FA Profile">` · waitForGone `<.loadingMask>`
+  - settle: `~Nms` after readiness (data-heavy detail screens need more — see runtime-readiness-and-auth.md)
+  - expected assets: `<theme/…, platform/styleSheets/…>` (must be 200; styled-vs-unstyled guard)
+  - known failure modes: <e.g. opening the .do without a session shows login; widgets hydrate ~Ns late>
 - **Visible states** (enumerate ALL; each needs evidence):
   - default — [SHOT:f0xx_default.png] [DOM:#main]
   - empty — [SHOT:f0xx_empty.png]
@@ -67,6 +75,7 @@ HTML/CSS port via CSS Modules; no component library. MSW serves captured fixture
   | GET | <…/fateamprofile.do?…> | struts | <params> | <fields…> | [ACTION:FaTeamProfileAction] |
 - **Assets to reuse.** [ASSET:theme/fonts/…] [ASSET:js/lib/ubs-icons/…]
 - **Success criteria** (ALL must pass before `verified`):
+  - [ ] legacy + React captures both `usable:true` (.capture.json: readiness passed, no asset 404)
   - [ ] parity-verify PASS for every visible state (0 critical structural deltas; pixel ≤ threshold)
   - [ ] copy/labels/validation text exact (DOM-diff clean)
   - [ ] field order, tab order, table columns exact

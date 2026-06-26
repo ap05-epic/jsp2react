@@ -72,6 +72,9 @@ The analyzer captured this screen into the evidence root. For each state read:
 - `<id_state>.model.json` — the normalized structure (copy, labels, control names, table columns, styles,
   box geometry) — your structural target and the thing parity will diff against.
 - `<id_state>.network.json` + the generated `src/mocks/<id>/fixtures.json` — the data to render.
+- `profiles/<id_state>.json` — the screen's **capture profile** (viewport, readiness `mustContain` text
+  markers, settle timing). You reuse this verbatim to capture the React side in §8 — read it now so you
+  know which key content must render (e.g. the `mustContain` strings are content the replica must show).
 - The JSP/fragment source named in spec (`[JSP:…]`) — to understand structure/conditionals.
 If a state's evidence is missing, see §4. Treat the screenshot as visual truth; use JSP source to explain
 it, never to override it.
@@ -93,14 +96,29 @@ Follow `react-replica-kit/references/jsp-to-react-mapping.md` and `css-porting.m
   the spec says; three similar lines beat a premature abstraction; `[INFERRED]` items stay simple and easy
   to change; debugging shortcuts (store injection, hardcoded state, entitlement bypass) are NOT signoff.
 
-## 8. Render & capture the React side
+## 8. Render & capture the React side — REUSE the legacy capture profile
 
 Run the app (`with_server.py --server "npm run dev" --port 5173` from webapp-testing, or `npm run dev`),
-then capture the React render with the SAME tool/viewport as the legacy side:
+then capture the React render with the SAME script **and the SAME capture profile** the analyzer wrote
+for this screen — only the URL changes:
 ```
-capture_screen.py --url http://localhost:5173/#/<id> --out-dir work/react --name <id>_<state> --viewport <STATUS viewport>
+capture_screen.py --profile profiles/<id_state>.json --url http://localhost:5173/#/<id> \
+  --out-dir work/react --name <id>_<state>
 ```
-MSW must be ON so it renders the captured data. Same script + same viewport + same data on both sides is
+Reusing the profile is what makes the diff valid: identical **viewport**, **`mustContain` text markers**
+(the same key content — e.g. "Compensation" — must appear on both sides), and **settle timing**.
+- **Keep identical:** viewport, `mustContain` text, final settle. These are data/parity-driven and must
+  hold on both sides; if a `mustContain` marker doesn't appear in React, that's a real defect — fix the
+  screen, don't drop the check.
+- **Adapt only side-specific *mechanical* readiness:** the legacy `waitFor`/`waitForGone` selectors may be
+  framework-specific (a Dojo `.loadingMask` the replica doesn't reproduce). If the React app's loading
+  mechanism differs, override just those on the CLI: `--wait-for <react-selector>`, and pass
+  `--wait-for-gone ""` to skip a mask the replica doesn't have (CLI flags override the profile; empty value
+  disables the check). Never relax the viewport or text markers.
+- **Check `usable`.** The React capture also writes `<name>.capture.json`; if `usable:false` (a marker
+  missing, or an asset 404), the render is wrong — fix before verifying, don't diff a broken capture.
+
+MSW must be ON so it renders the captured data. Same script + same profile + same data on both sides is
 what makes the diff valid.
 
 ## 9. PROVE parity (mandatory gate — the closure loop)
@@ -166,10 +184,10 @@ facts. Rate what you use.
 ```text
 1. READ STATUS.md                    -> the next slice (deps verified)
 2. READ spec (assigned screen only)  -> states, 1:1 inventory, endpoints, criteria
-3. MAP states -> captured evidence   -> missing? stop, don't infer
+3. MAP states -> captured evidence   -> incl. capture profile; missing? stop, don't infer
 4. EXPLORE/scaffold React app        -> match existing conventions
 5. IMPLEMENT 1:1                      -> DOM+CSS port, reuse assets, wire MSW fixtures
-6. RENDER + capture_screen.py        -> react png + model (same viewport/data)
+6. RENDER + capture_screen.py        -> --profile (same viewport/markers/settle); usable? check sidecar
 7. verify_screen.py                  -> deterministic gate + actionable report
 8. FIX from deltas -> re-verify       -> loop until PASS
 9. UPDATE STATUS.md (strict status)  -> verified; next slice; log

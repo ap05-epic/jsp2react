@@ -16,7 +16,9 @@
  * Works with pixelmatch v5 (CJS) and v6 (ESM) via the loader below.
  */
 const fs = require('fs');
-const { PNG } = require('pngjs');
+let PNG = null, pngError = null;
+try { PNG = require('pngjs').PNG; }
+catch (e) { pngError = e; }   // reported gracefully by --self-check instead of crashing at load
 
 async function loadPixelmatch() {
   try { return require('pixelmatch'); }
@@ -113,11 +115,18 @@ function parseArgs(argv) {
 
 async function main() {
   const a = parseArgs(process.argv);
-  const pixelmatch = await loadPixelmatch();
   const threshold = a.threshold ? parseFloat(a.threshold) : 0.1;
   const cell = a.cell ? parseInt(a.cell) : 16;
 
   if (a.selfCheck) {
+    // Gracefully report missing deps instead of crashing with a require() stack trace.
+    let pixelmatch = null;
+    try { pixelmatch = await loadPixelmatch(); } catch (e) { /* report below */ }
+    if (pngError || !pixelmatch) {
+      console.log(JSON.stringify({ self_check: 'deps-missing', pngjs: !pngError, pixelmatch: !!pixelmatch,
+        fix: 'cd <skills>/parity-verify && npm install   (installs pixelmatch + pngjs from package.json)' }));
+      process.exit(1);
+    }
     const img = new PNG({ width: 20, height: 20, fill: true });
     for (let i = 0; i < img.data.length; i += 4) { img.data[i] = 10; img.data[i + 1] = 20; img.data[i + 2] = 30; img.data[i + 3] = 255; }
     const diff = new PNG({ width: 20, height: 20 });
@@ -126,6 +135,7 @@ async function main() {
     return;
   }
 
+  const pixelmatch = await loadPixelmatch();
   let img1 = PNG.sync.read(fs.readFileSync(a.legacy));
   let img2 = PNG.sync.read(fs.readFileSync(a.react));
   const dimMismatch = (img1.width !== img2.width || img1.height !== img2.height)

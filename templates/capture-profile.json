@@ -1,0 +1,72 @@
+{
+  "_schema": {
+    "purpose": "A per-screen CAPTURE CONTRACT: how to deterministically reach and capture one legacy screen so the evidence is real (usable, not just 'rendered'). The analyzer writes one of these per screen; capture_screen.py reads it with --profile; the BUILDER reuses the SAME profile to capture the React side, guaranteeing comparable captures.",
+    "consumed_by_capture_screen": ["url", "viewport", "workflow", "waitFor", "mustContain", "waitForGone", "waitMs"],
+    "documentation_only": ["id", "screen", "canonicalRoute", "authContext", "expectedAssets", "knownFailureModes", "notes"],
+    "rules": [
+      "Prefer semantic readiness (waitFor + mustContain + waitForGone) over a big waitMs; waitMs is the LAST small settle, not the strategy.",
+      "Record the canonical route AND the misleading routes (e.g. a direct *.do that shows an error page).",
+      "workflow may be an inline list of steps (navigate/click/fill/select/wait) OR a path to a steps JSON.",
+      "Use the same profile (minus url) for the legacy and react captures."
+    ]
+  },
+
+  "examples": [
+    {
+      "id": "F000_login",
+      "screen": "Login page",
+      "canonicalRoute": "/BAA/jsp/login.jsp",
+      "authContext": "pre-auth",
+      "url": "http://127.0.0.1:8080/BAA/jsp/login.jsp",
+      "viewport": "1920x1080",
+      "waitFor": "form input[name='userId']",
+      "mustContain": ["Business Analysis"],
+      "waitForGone": null,
+      "waitMs": 1000,
+      "expectedAssets": ["/BAA/platform/styleSheets/", "/BAA/theme/"],
+      "knownFailureModes": ["none"],
+      "notes": "Static pre-auth page; minimal settle."
+    },
+    {
+      "id": "F010_fasummary_ab10",
+      "screen": "FA Summary (AB10)",
+      "canonicalRoute": "dispatcherAction.do?page=fasummary&fanum=AB10&entityLevel=COM9999",
+      "authContext": "authenticated via the REAL login-form submit; FA context AB10. Reuse auth_state.json (--auth-state).",
+      "url": "http://127.0.0.1:8080/BAA/dispatcherAction.do?page=fasummary&fanum=AB10&entityLevel=COM9999",
+      "viewport": "1920x1080",
+      "workflow": null,
+      "waitFor": "#pmenu",
+      "mustContain": ["Compensation", "FA Profile"],
+      "waitForGone": ".loadingMask",
+      "waitMs": 8000,
+      "expectedAssets": ["/BAA/theme/", "/BAA/platform/styleSheets/"],
+      "knownFailureModes": [
+        "Opening dispatcherAction.do WITHOUT a live logged-in session shows the login/error route, not the summary.",
+        "Direct loginAction.do is a MISLEADING target (standalone error page) — never use it as a verification route.",
+        "FA-detail widgets hydrate ~8s after first HTML; capturing too early yields missing backend data."
+      ],
+      "notes": "Reach by submitting the real login form first (or reuse auth_state.json), THEN this dispatcher route. ~5s baseline + ~8s for FA-detail widgets."
+    },
+    {
+      "id": "F001_login_then_summary",
+      "screen": "Post-login FA Summary (via real form submit)",
+      "canonicalRoute": "loginAction.do (as a FORM POST, not a direct GET) -> dispatcher summary",
+      "authContext": "performs the real login, then lands on the authenticated summary",
+      "url": "http://127.0.0.1:8080/BAA/jsp/login.jsp",
+      "viewport": "1920x1080",
+      "workflow": [
+        {"action": "navigate", "url": "http://127.0.0.1:8080/BAA/jsp/login.jsp"},
+        {"action": "fill", "selector": "input[name='userId']", "value": "<from login.env>"},
+        {"action": "fill", "selector": "input[name='password']", "value": "<from login.env>"},
+        {"action": "click", "selector": "button[type='submit'], input[type='submit']"},
+        {"action": "wait", "selector": "#pmenu", "timeout": 30000}
+      ],
+      "waitFor": "#pmenu",
+      "mustContain": ["FA Profile"],
+      "waitForGone": ".loadingMask",
+      "waitMs": 5000,
+      "knownFailureModes": ["The app may try to recover auth via platform/GCS paths that don't exist on localhost — see runtime-readiness-and-auth.md."],
+      "notes": "Use this when you must prove the real login navigation rather than reusing a saved session."
+    }
+  ]
+}

@@ -143,24 +143,37 @@ def run_workflow(page, steps):
             raise SystemExit(f"unknown workflow action: {a!r}")
 
 
+def load_profile(path):
+    return json.load(open(path, encoding="utf-8")) if path else {}
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Capture one screen state as comparable evidence (png + normalized model + a11y + network).")
-    ap.add_argument("--url", required=True, help="URL to capture (legacy screen OR react render).")
-    ap.add_argument("--out-dir", required=True, help="Directory for output artifacts.")
-    ap.add_argument("--name", required=True, help="Base name, e.g. f010_default.")
+    ap = argparse.ArgumentParser(description="Capture one screen state as comparable evidence (png + normalized model + a11y + network + capture metadata) with semantic readiness.")
+    ap.add_argument("--url", help="URL to capture (legacy screen OR react render). May instead come from --profile.")
+    ap.add_argument("--out-dir", help="Directory for output artifacts. Required for a real capture (not --self-check).")
+    ap.add_argument("--name", help="Base name, e.g. f010_default. Required for a real capture (not --self-check).")
+    ap.add_argument("--profile", help="Capture-profile JSON (url/workflow/viewport/readiness markers). CLI flags override its keys. Use the SAME profile for the legacy AND react capture so both sides are comparable.")
     ap.add_argument("--auth-state", help="Playwright storage_state json (login reuse; from save_auth_state.py).")
-    ap.add_argument("--viewport", default="1920x1080", help="WIDTHxHEIGHT; use the SAME value for legacy and react.")
-    ap.add_argument("--wait-for", help="CSS selector to wait for before capture.")
-    ap.add_argument("--wait-ms", type=int, default=0, help="Extra settle wait after networkidle (hydration).")
-    ap.add_argument("--workflow", help="JSON file: list of navigate/click/fill/select/wait steps to reach a deep state before capture.")
+    ap.add_argument("--viewport", help="WIDTHxHEIGHT; use the SAME value for legacy and react (default 1920x1080).")
+    ap.add_argument("--wait-for", help="CSS selector that must APPEAR before capture.")
+    ap.add_argument("--must-contain", action="append", default=None, help="Text that must APPEAR before capture (repeatable). Proves the screen is USABLE, not just loaded.")
+    ap.add_argument("--wait-for-gone", help="CSS selector that must DISAPPEAR before capture (e.g. a loading mask/spinner).")
+    ap.add_argument("--wait-ms", type=int, default=None, help="Final settle wait, applied LAST after the readiness checks above (not the main strategy).")
+    ap.add_argument("--readiness-timeout", type=int, default=30000, help="Max ms to wait for each readiness check.")
+    ap.add_argument("--workflow", help="JSON file of navigate/click/fill/select/wait steps to reach a deep state before capture.")
     ap.add_argument("--full-page", action="store_true", help="Full scrollable page (default: viewport only, recommended for parity).")
     ap.add_argument("--body-cap", type=int, default=500_000, help="Max response body bytes stored per request.")
     ap.add_argument("--self-check", action="store_true", help="Validate environment/args without launching a browser, then exit.")
     args = ap.parse_args()
 
-    vp = parse_viewport(args.viewport)
-    os.makedirs(args.out_dir, exist_ok=True)
-    base = os.path.join(args.out_dir, args.name)
+    prof = load_profile(args.profile)
+    url = args.url or prof.get("url")
+    vp = parse_viewport(args.viewport or prof.get("viewport") or "1920x1080")
+    wait_for = args.wait_for if args.wait_for is not None else prof.get("waitFor")
+    must_contain = args.must_contain if args.must_contain is not None else prof.get("mustContain", [])
+    wait_for_gone = args.wait_for_gone if args.wait_for_gone is not None else prof.get("waitForGone")
+    wait_ms = args.wait_ms if args.wait_ms is not None else int(prof.get("waitMs", 0))
+    rt_timeout = args.readiness_timeout
 
     if args.self_check:
         try:
@@ -168,16 +181,33 @@ def main():
             ok = True
         except Exception:
             ok = False
-        print(json.dumps({"self_check": "ok", "viewport": vp, "out_base": base, "playwright_importable": ok}))
+        out_base = os.path.join(args.out_dir, args.name) if (args.out_dir and args.name) else None
+        print(json.dumps({"self_check": "ok", "viewport": vp, "out_base": out_base, "playwright_importable": ok,
+                          "resolved": {"url": url, "wait_for": wait_for, "must_contain": must_contain,
+                                       "wait_for_gone": wait_for_gone, "wait_ms": wait_ms}}))
         return
+
+    if not args.out_dir or not args.name:
+        raise SystemExit("--out-dir and --name are required for a capture")
+    if not url:
+        raise SystemExit('no URL: pass --url or put "url" in --profile')
+    os.makedirs(args.out_dir, exist_ok=True)
+    base = os.path.join(args.out_dir, args.name)
 
     try:
         from playwright.sync_api import sync_playwright
     except Exception as e:
         raise SystemExit(f"Playwright not available ({e}). On the pod: pip install playwright && playwright install chromium")
 
-    steps = json.load(open(args.workflow)) if args.workflow else None
-    network = []
+    # workflow steps: explicit --workflow file > profile inline list > profile path
+    steps = None
+    if args.workflow:
+        steps = json.load(open(args.workflow))
+    elif isinstance(prof.get("workflow"), list):
+        steps = prof["workflow"]
+    elif isinstance(prof.get("workflow"), str):
+        steps = json.load(open(prof["workflow"]))
+    network, assets = [], []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -190,16 +220,17 @@ def main():
         def on_response(resp):
             try:
                 rt = resp.request.resource_type
-                if rt not in ("document", "xhr", "fetch"):
-                    return
-                rec = {"method": resp.request.method, "url": resp.url, "status": resp.status,
-                       "resource_type": rt, "content_type": resp.headers.get("content-type", "")}
-                ct = rec["content_type"]
-                if ("json" in ct) or ("text" in ct) or ("xml" in ct):
-                    body = resp.body()
-                    if body and len(body) <= args.body_cap:
-                        rec["body"] = body.decode("utf-8", "replace")
-                network.append(rec)
+                if rt in ("document", "xhr", "fetch"):
+                    rec = {"method": resp.request.method, "url": resp.url, "status": resp.status,
+                           "resource_type": rt, "content_type": resp.headers.get("content-type", "")}
+                    ct = rec["content_type"]
+                    if ("json" in ct) or ("text" in ct) or ("xml" in ct):
+                        body = resp.body()
+                        if body and len(body) <= args.body_cap:
+                            rec["body"] = body.decode("utf-8", "replace")
+                    network.append(rec)
+                elif rt in ("stylesheet", "script", "font", "image"):
+                    assets.append({"url": resp.url, "status": resp.status, "resource_type": rt})  # health only, no body
             except Exception:
                 pass  # opaque/redirected responses can't be read; skip quietly
 
@@ -208,16 +239,47 @@ def main():
         if steps:
             run_workflow(page, steps)
         else:
-            page.goto(args.url, wait_until="networkidle")
-        if args.wait_for:
-            page.wait_for_selector(args.wait_for, timeout=30000)
-        if args.wait_ms:
-            page.wait_for_timeout(args.wait_ms)
-        # fonts settled => stable text metrics for pixel parity
+            page.goto(url, wait_until="networkidle")
+
+        # --- semantic readiness, in order: selector -> text markers -> spinner gone -> fonts -> settle ---
+        # ("page loaded" != "screen usable"; networkidle alone misses async-hydrated widgets)
+        readiness = {"wait_for": None, "must_contain": {}, "wait_for_gone": None, "fonts": False, "settle_ms": wait_ms}
+        warnings = []
+        if wait_for:
+            try:
+                page.wait_for_selector(wait_for, timeout=rt_timeout); readiness["wait_for"] = True
+            except Exception:
+                readiness["wait_for"] = False; warnings.append(f"selector never appeared: {wait_for}")
+        for marker in (must_contain or []):
+            try:
+                page.wait_for_function("t => document.body && document.body.innerText.includes(t)",
+                                       arg=marker, timeout=rt_timeout)
+                readiness["must_contain"][marker] = True
+            except Exception:
+                readiness["must_contain"][marker] = False
+                warnings.append(f"text marker never appeared: {marker!r}")
+        if wait_for_gone:
+            try:
+                page.wait_for_selector(wait_for_gone, state="hidden", timeout=rt_timeout); readiness["wait_for_gone"] = True
+            except Exception:
+                readiness["wait_for_gone"] = False; warnings.append(f"element never disappeared: {wait_for_gone}")
         try:
-            page.evaluate("document.fonts && document.fonts.ready")
+            page.evaluate("document.fonts ? document.fonts.ready : null"); readiness["fonts"] = True
         except Exception:
             pass
+        if wait_ms:
+            page.wait_for_timeout(wait_ms)
+
+        # styled-vs-unstyled / asset health
+        asset_fail = [a for a in assets if a["resource_type"] in ("stylesheet", "script") and a["status"] >= 400]
+        stylesheets = sum(1 for a in assets if a["resource_type"] == "stylesheet")
+        scripts = sum(1 for a in assets if a["resource_type"] == "script")
+        if asset_fail:
+            warnings.append(f"{len(asset_fail)} CSS/JS asset(s) returned >=400 — page may be unstyled/broken")
+        try:
+            body_font = page.evaluate("getComputedStyle(document.body).fontFamily") or ""
+        except Exception:
+            body_font = ""
 
         page.screenshot(path=base + ".png", full_page=args.full_page)
         open(base + ".dom.html", "w", encoding="utf-8").write(page.content())
@@ -229,17 +291,32 @@ def main():
             a11y = None
         json.dump(a11y, open(base + ".a11y.json", "w", encoding="utf-8"), indent=1)
         json.dump(network, open(base + ".network.json", "w", encoding="utf-8"), indent=1)
+        final_url = page.url
         ctx.close()
         browser.close()
 
-    print(json.dumps({
-        "ok": True, "name": args.name,
-        "png": base + ".png", "model": base + ".model.json",
-        "elements": len(model["elements"]), "tables": len(model["tables"]),
-        "network_records": len(network),
-        "sha256": {"png": sha256(base + ".png"), "dom": sha256(base + ".dom.html")},
+    # usable = every defined readiness check passed AND no CSS/JS failed (i.e. real parity evidence, not just "rendered")
+    usable = (readiness["wait_for"] is not False
+              and all(readiness["must_contain"].values())
+              and readiness["wait_for_gone"] is not False
+              and not asset_fail)
+
+    meta = {
+        "name": args.name, "url": url, "final_url": final_url,
+        "viewport": args.viewport or prof.get("viewport") or "1920x1080",
+        "auth_state": bool(args.auth_state), "profile": args.profile,
         "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
-    }, indent=1))
+        "readiness": readiness, "usable": usable, "warnings": warnings,
+        "assets": {"ok": not asset_fail, "failed": asset_fail[:20], "stylesheets": stylesheets, "scripts": scripts},
+        "body_font_family": body_font,
+        "sha256": {"png": sha256(base + ".png"), "dom": sha256(base + ".dom.html")},
+        "elements": len(model["elements"]), "tables": len(model["tables"]), "network_records": len(network),
+    }
+    json.dump(meta, open(base + ".capture.json", "w", encoding="utf-8"), indent=1)
+
+    print(json.dumps({"ok": True, "name": args.name, "usable": usable, "warnings": warnings,
+                      "png": base + ".png", "model": base + ".model.json", "capture": base + ".capture.json",
+                      "elements": meta["elements"], "network_records": meta["network_records"]}, indent=1))
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ jsp2react/
 │   ├── legacy-crawl-capture/
 │   │   ├── SKILL.md
 │   │   ├── scripts/{crawl_screens.py, capture_screen.py, capture_fixtures.py}
-│   │   └── references/struts-jsp-endpoint-mapping.md
+│   │   └── references/{struts-jsp-endpoint-mapping.md, runtime-readiness-and-auth.md}
 │   ├── parity-verify/
 │   │   ├── SKILL.md
 │   │   ├── package.json          # declares pixelmatch + pngjs (install.sh runs `npm install` here)
@@ -34,7 +34,7 @@ jsp2react/
 │       ├── SKILL.md
 │       ├── scripts/{scaffold_app.sh, serve_review.py}
 │       └── references/{jsp-to-react-mapping.md, css-porting.md}
-└── templates/{STATUS.md, spec.md, MANIFEST.json}
+└── templates/{STATUS.md, spec.md, MANIFEST.json, capture-profile.json}
 ```
 
 ## 2. What `install.sh` does (and the manual equivalent)
@@ -131,10 +131,16 @@ python ~/.copilot/skills/webapp-snapshot/scripts/save_auth_state.py --url <login
 python ~/.copilot/skills/legacy-crawl-capture/scripts/crawl_screens.py \
   --struts-config <…>/WEB-INF/struts-config.xml --webapp-dir <…>/webapp --out work/screens.json
 
-# 3. capture ONE legacy screen
+# 3. capture ONE legacy screen — with SEMANTIC READINESS so the capture is USABLE, not just "rendered".
+#    Readiness order: --wait-for selector -> --must-contain text -> --wait-for-gone spinner -> small --wait-ms.
+#    Check the <name>.capture.json sidecar: "usable": true means readiness passed AND no CSS/JS 404.
+#    (Or pass --profile work/profiles/f010.json — a reusable capture contract; see templates/capture-profile.json.)
 python ~/.copilot/skills/legacy-crawl-capture/scripts/capture_screen.py \
   --url <screen-url> --out-dir work/screenshots --name f010_default \
-  --auth-state work/auth_state.json --viewport 1920x1080 --wait-ms 8000
+  --auth-state work/auth_state.json --viewport 1920x1080 \
+  --wait-for "#pmenu" --must-contain "Compensation" --wait-for-gone ".loadingMask" --wait-ms 8000
+# Why each flag / localhost+auth+timing troubleshooting:
+#   ~/.copilot/skills/legacy-crawl-capture/references/runtime-readiness-and-auth.md
 
 # 4. fixtures + scaffold the app
 python ~/.copilot/skills/legacy-crawl-capture/scripts/capture_fixtures.py \
@@ -142,8 +148,11 @@ python ~/.copilot/skills/legacy-crawl-capture/scripts/capture_fixtures.py \
 bash   ~/.copilot/skills/react-replica-kit/scripts/scaffold_app.sh <app>     # if not scaffolded yet
 
 # 5. (builder builds src/screens/F010, runs `npm run dev`, then captures the react side)
+#    REUSE the same readiness (viewport + must-contain text + settle) so both captures are comparable.
+#    The Dojo ".loadingMask" won't exist in React — skip just that mechanical check with --wait-for-gone "".
 python ~/.copilot/skills/legacy-crawl-capture/scripts/capture_screen.py \
-  --url http://localhost:5173/#/f010 --out-dir work/react --name f010_default --viewport 1920x1080
+  --url http://localhost:5173/#/f010 --out-dir work/react --name f010_default --viewport 1920x1080 \
+  --wait-for "#root" --must-contain "Compensation" --wait-for-gone "" --wait-ms 8000
 
 # 6. PROVE parity
 python ~/.copilot/skills/parity-verify/scripts/verify_screen.py \
@@ -169,10 +178,12 @@ agents (by name / trigger phrase). Suggested prompts:
 **Step B — analyze (run once; it builds the contract for ALL screens). You give it only the URL + login:**
 > "Use the **jsp2react-analyzer** agent. Legacy app URL = `<…>`. Log in via
 > webapp-snapshot/save_auth_state.py (creds/auth_state at `<…>`). The legacy source is at `<…>` *(omit this
-> line to let it discover the source)*. **Bootstrap STATUS.md yourself**, then log in, crawl and capture
-> every screen, map each screen's endpoints, generate MSW fixtures, and write spec.md + STATUS.md +
-> MANIFEST.json. Begin with the shell + one family, then continue across all families until the coverage
-> matrix is met."
+> line to let it discover the source)*. **Bootstrap STATUS.md yourself**, then log in, **run pre-capture
+> triage (app reachable, auth end-to-end, canonical post-login route, assets 200, one data-heavy page
+> actually hydrates) before mass capture**, then crawl and capture every screen (write a capture profile
+> per screen; a capture counts only when its `.capture.json` says `usable:true`), map each screen's
+> endpoints, generate MSW fixtures, and write spec.md + STATUS.md + MANIFEST.json. Begin with the shell +
+> one family, then continue across all families until the coverage matrix is met."
 
 That's the whole human input: the **URL** and **how to log in** (source path optional). The analyzer
 discovers/derives everything else into STATUS.md — you never hand-edit it.
@@ -209,3 +220,7 @@ Then simply: **"Continue with the next screen."** (repeat) — or, once you trus
   see `parity-thresholds.md` "Making the comparison fair".
 - Login redirects reappear mid‑run → session expired; re‑run step 1; note it in `STATUS.md §7`.
 - Crawl misses screens → check `screens.json.reconciliation`; add missing actions/JSPs as spec §4 entries.
+- Capture `usable:false`, or page looks unstyled / shows an error / is missing data → it "rendered" but
+  isn't real evidence. Almost always: a misleading direct `*.do` route (use the real login→dispatcher
+  flow), CSS/JS 404s (no live app base), or async data captured too early (raise readiness/settle). Full
+  runbook incl. localhost/non‑SSO + timing: `legacy-crawl-capture/references/runtime-readiness-and-auth.md`.

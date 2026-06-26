@@ -1,17 +1,25 @@
 # SETUP — standing up jsp2react on the pod (by hand)
 
-Everything here is plain text. Copy the `jsp2react/` tree to the pod, place the files, install three
-open‑source packages, fill in `STATUS.md`, and run the smoke test. No auto‑install, no auto‑discovery.
+Fastest path: clone the repo and run **one command**. The rest of this file explains what that command
+does and how to run your first screen. Later, DigitCode (`dc agent install jsp2react`) replaces it.
 
-## 1. File tree (what you're copying)
+```bash
+git clone https://github.com/ap05-epic/jsp2react.git
+cd jsp2react
+bash install.sh
+```
+
+## 1. File tree
 
 ```
 jsp2react/
+├── install.sh                    # one-command setup (placement + deps + checks)
 ├── README.md
 ├── SETUP.md
+├── docs/HOW-IT-WORKS.md
 ├── agents/
-│   ├── jsp2react-analyzer.md
-│   └── jsp2react-builder.md
+│   ├── jsp2react-analyzer.agent.md
+│   └── jsp2react-builder.agent.md
 ├── skills/
 │   ├── legacy-crawl-capture/
 │   │   ├── SKILL.md
@@ -19,6 +27,7 @@ jsp2react/
 │   │   └── references/struts-jsp-endpoint-mapping.md
 │   ├── parity-verify/
 │   │   ├── SKILL.md
+│   │   ├── package.json          # declares pixelmatch + pngjs (install.sh runs `npm install` here)
 │   │   ├── scripts/{verify_screen.py, dom_diff.py, pixel_diff.js}
 │   │   └── references/parity-thresholds.md
 │   └── react-replica-kit/
@@ -28,17 +37,21 @@ jsp2react/
 └── templates/{STATUS.md, spec.md, MANIFEST.json}
 ```
 
-## 2. Where each file goes on the pod
+## 2. What `install.sh` does (and the manual equivalent)
 
-| File(s) | Destination | Why |
+`bash install.sh` performs exactly these steps — run them by hand only if you want to:
+
+| Step | Command it runs | Destination |
 |---|---|---|
-| `skills/*` (whole folders) | `~/.copilot/skills/` (i.e. `~/.copilot/skills/legacy-crawl-capture/`, …) | same place as the existing `webapp-snapshot`, `webapp-testing`, `digimem`, `playwright-cli` skills |
-| `agents/*.md` | wherever your Copilot CLI discovers custom agents (the same location as your existing `baa-*` agents) | Copilot loads agent manuals from there |
-| `templates/*` | copy into each run's working dir as `STATUS.md`, `spec.md`, `MANIFEST.json` (the analyzer seeds them) | they are per‑project state, not global |
+| place skills | `cp -r skills/* ~/.copilot/skills/` | `~/.copilot/skills/{legacy-crawl-capture,parity-verify,react-replica-kit}` |
+| place agents | `cp agents/*.agent.md ~/.copilot/agents/` | `~/.copilot/agents/` (same place DigitCode/Copilot read agents) |
+| pixel deps | `cd ~/.copilot/skills/parity-verify && npm install` | installs pixelmatch+pngjs (from `package.json`) so `pixel_diff.js` resolves them |
+| checks | verifies Node, Python 3, Playwright are present | warns if anything's missing |
 
-> The exact agents directory and the `~/.copilot/skills` path are **runtime configuration** — if your pod
-> uses different locations, use those. Nothing in the code hardcodes these; scripts are resolved via paths
-> in `STATUS.md §2`.
+Override the targets if your pod differs: `COPILOT_SKILLS_DIR=… COPILOT_AGENTS_DIR=… bash install.sh`.
+Templates are per‑run: copy `templates/STATUS.md` into your run folder and fill §1–§3.
+
+> Paths aren't hardcoded anywhere — the scripts resolve everything from `STATUS.md §2` at run time.
 
 ## 3. Prerequisites already on the pod (verify, don't install)
 
@@ -63,13 +76,14 @@ All MIT. The pod can pull these from GitHub/npm; here is exactly what and from w
 `pixelmatch`, and `pngjs` into the React app** and runs `npx msw init public/`. So scaffolding the app
 covers all four packages for the app itself.
 
-**One manual step — give the parity skill its own copy of the pixel libs.** `pixel_diff.js` lives in the
+**The parity skill's pixel libs — `install.sh` already did this.** `pixel_diff.js` lives in the
 `parity-verify` skill (a different folder than the React app), and Node resolves a script's `require()`
-from its own folder upward — not from the React app. So once, on the pod:
+from its own folder upward — not from the React app. The skill ships a `package.json`, and `install.sh`
+runs `npm install` there for you. If you skipped `install.sh`, do it once by hand:
 ```bash
-cd ~/.copilot/skills/parity-verify && npm init -y && npm i pixelmatch@5.3.0 pngjs@7
+cd ~/.copilot/skills/parity-verify && npm install      # reads package.json -> pixelmatch + pngjs
 ```
-Verify it worked: `node ~/.copilot/skills/parity-verify/scripts/pixel_diff.js --self-check` → expects
+Verify: `node ~/.copilot/skills/parity-verify/scripts/pixel_diff.js --self-check` → expects
 `{"self_check":"ok","identical_diff_pixels":0}`.
 
 **Not npm (must already be on the pod):** Node.js + npm; and **Python 3 + Playwright** for capture

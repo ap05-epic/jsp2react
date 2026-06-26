@@ -7,6 +7,18 @@ each, and **proves** each match deterministically — then serves originals next
 It is the live-app analog of **fig2code** (Figma→code): same conventions and status‑driven loop, but the
 source of truth is a *running legacy screen + its JSP/Struts source*, not a static design.
 
+## Quick start (manual phase)
+
+```bash
+git clone https://github.com/ap05-epic/jsp2react.git
+cd jsp2react
+bash install.sh        # copies skills+agents into ~/.copilot, installs pixel-diff deps, checks prereqs
+```
+Then fill `templates/STATUS.md` §1–§3 (legacy URL, source path, target app path, login), and in Copilot
+run the **jsp2react-analyzer** agent, then **jsp2react-builder** repeatedly (exact prompts in
+[SETUP.md §6b](SETUP.md)). Prereqs the installer checks for: Node.js, Python 3 + Playwright.
+*(Later, `dc agent install jsp2react` replaces `install.sh`.)*
+
 ## How it works (two agents, one contract, three skills)
 
 ```
@@ -47,12 +59,13 @@ verify_screen.py (pixel + DOM diff) → FIX from the concrete delta report → r
 
 ```
 jsp2react/
+├── install.sh           ← one command: places skills+agents + installs deps (manual phase)
 ├── README.md            ← you are here (technical entry point)
-├── SETUP.md             ← how to stand this up on the pod by hand + the Copilot prompts (read this next)
+├── SETUP.md             ← detailed stand-up + the Copilot prompts (read this next)
 ├── docs/
 │   └── HOW-IT-WORKS.md  ← plain-English explainer (use this to understand it / show colleagues)
-├── agents/              ← the two operating manuals (Copilot agents)
-├── skills/              ← legacy-crawl-capture · parity-verify · react-replica-kit
+├── agents/              ← jsp2react-analyzer.agent.md · jsp2react-builder.agent.md
+├── skills/              ← legacy-crawl-capture · parity-verify · react-replica-kit (each a SKILL.md + scripts)
 └── templates/           ← STATUS.md · spec.md · MANIFEST.json (copied into a run)
 ```
 

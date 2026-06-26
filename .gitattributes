@@ -1,0 +1,4 @@
+# Store and check out all text with LF so scripts run correctly on the Linux pod.
+* text=auto eol=lf
+*.png binary
+*.ico binary

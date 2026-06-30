@@ -211,7 +211,7 @@ def main():
             page.click(sel, timeout=args.readiness_timeout)
 
     def reach(page, path):
-        page.goto(args.start_url, wait_until="networkidle")
+        page.goto(args.start_url, wait_until="domcontentloaded")   # settle() does the bounded networkidle wait
         settle(page)
         for step in path:
             do_action(page, step)

@@ -84,13 +84,16 @@ unmatched entry in spec.md §4.
 This is the **authoritative parity capture** (not a quick screenshot — see the snapshot note above).
 It enforces *semantic readiness* so the bundle reflects a **usable** screen, not just a rendered one.
 ```bash
-# Driven by a per-screen capture profile (preferred — same contract reused for the React side):
-python scripts/capture_screen.py --profile profiles/f010_default.json \
-  --out-dir work/evidence/f010_default --name legacy --auth-state auth_state.json --record-har
+# Session-sensitive / AJAX legacy screen (recommended): FRESH from-start login, no stale cookie:
+python scripts/capture_screen.py --profile profiles/f010_default.json --project work/project.json \
+  --out-dir work/evidence/f010_default --name legacy --login --creds login.env --record-har
+
+# Quick auth probe — verify login works in ISOLATION from capture (prints post-login title; exit 0/2):
+python scripts/capture_screen.py --check-login --project work/project.json --creds login.env
 
 # Or fully on the CLI:
-python scripts/capture_screen.py --url <legacy-screen-url> \
-  --out-dir work/screenshots --name f010_default --auth-state auth_state.json \
+python scripts/capture_screen.py --url <legacy-screen-url> --project work/project.json --login --creds login.env \
+  --out-dir work/screenshots --name f010_default \
   --viewport 1920x1080 --wait-for "#pmenu" \
   --must-contain "<a label that proves real data loaded>" \
   --wait-for-gone ".loadingMask" --wait-ms 8000
@@ -101,6 +104,15 @@ readiness checks ran and passed, asset statuses, settle time, key text markers, 
 `usable` flag). **`usable` is true only when every configured readiness check passed AND no expected
 asset failed** — a `usable:false` PNG is not admissible parity evidence.
 
+- **`--login` (+ `--project`, `--creds`)** does a FRESH from-start login in the capture context (warms the
+  session), then navigates the target — the robust path for **session-sensitive / AJAX screens** where a saved
+  `--auth-state` is a stale single cookie the server rotates. Reads `loginUrl`/`loginFields` from project.json;
+  creds from a gitignored `login.env` (or `LEGACY_USER`/`LEGACY_PASS` env). The login POST is **redacted from the
+  saved HAR**. `--check-login` runs just the login as an auth probe. `profiles` can set `"login": true` instead.
+- **No-stall guarantee:** navigation uses `domcontentloaded` + a **bounded** networkidle settle, and the whole
+  capture is wrapped so the **HAR always flushes and partial artifacts are written even on a timeout** — a hang
+  becomes a `rejected` capture with a `nav_error` (exit 2), never a silent stall. `--channel chrome|msedge` falls
+  back to a system browser when bundled Chromium isn't installed (`python -m playwright install chromium`).
 - **`--record-har`** saves `<name>.har` — the REAL backend responses for record-mode replay (no fakes).
 - **Error-page quarantine:** the document HTTP status + `errorSignatures` are checked; an error/wrong page
   is written under `_rejected/` and flagged `rejected:true`, NOT promoted as the view's evidence. Look

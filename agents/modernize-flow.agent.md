@@ -64,9 +64,11 @@ Do this ONCE, then implement repeatedly. Order matters:
 5. **Per flow, parse the source**: `extract_jsp.py` → `<view>/source-model.json` (the UI build input); and
    `extract_backend.py` → `<flow>/backend-model.json` (the SP contract — name, typed params, result columns,
    session/request inputs).
-6. **Capture evidence + REAL responses**: write a capture profile (workflow = the from-start click-path),
-   `capture_screen.py --profile --record-har`. Error pages are quarantined to `_rejected/` — **look around again,
-   do not accept them**. Confirm `usable:true`.
+6. **Capture evidence + REAL responses**: write a capture profile, `capture_screen.py --profile --record-har`.
+   For session-sensitive / AJAX screens use **`--login --project --creds`** (fresh from-start login — a saved
+   `auth_state` is often a stale single cookie the server rotates; `--check-login` verifies auth first). Error
+   pages are quarantined to `_rejected/` — **look around again, do not accept them**. Confirm `usable:true` (a
+   `nav_error`/exit 2 means a stall — inspect the partial `_rejected/` artifacts, don't retry blindly).
 7. **Write the contract**: `spec.md` (10 sections incl. stored-procedure mappings + the state/auth/session model)
    and `status.md` (control-level feature inventory: one row per dropdown/grid/sort/empty-state, FULL adds the
    backend rows). `build_index.py` → `evidence/INDEX.html`. Reconcile JSP/action/SP counts in spec §10.

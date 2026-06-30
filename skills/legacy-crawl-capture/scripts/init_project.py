@@ -161,12 +161,18 @@ def build(url, webapp_dir, source_dir):
     if not sqlmap:
         todo.append("db.sqlmapDir: no CALLABLE sqlmaps found under --source-dir; set it (FULL mode) or leave blank if raw JDBC.")
 
+    login_url = ""
+    if login_file and webapp_dir and base:                       # full URL of the login form (used by capture --login)
+        rel = os.path.relpath(login_file, webapp_dir).replace("\\", "/")
+        login_url = base.rstrip("/") + ctx + "/" + rel.lstrip("/")
+
     proj = {
         "appName": (ctx.strip("/").upper() if ctx else ""),
         "contextRoot": ctx,
         "legacyBaseUrl": base or "http://127.0.0.1:8080",
         "legacySourceDir": webapp_dir or "",
         "loginAction": action,
+        "loginUrl": login_url,
         "loginFields": {"user": user_f or "username", "password": pass_f or "password"},
         "families": families or "auto",
         "pathConventions": conv,
@@ -210,6 +216,7 @@ def self_check():
     assert p["contextRoot"] == "/ACME", p["contextRoot"]
     assert p["legacyBaseUrl"] == "http://host:8080", p["legacyBaseUrl"]
     assert p["loginAction"] == "/ACME/loginAction.do", p["loginAction"]
+    assert p["loginUrl"] == "http://host:8080/ACME/jsp/login.jsp", p["loginUrl"]
     assert p["loginFields"] == {"user": "empId", "password": "pin"}, p["loginFields"]
     assert "orders" in p["families"] and "claims" in p["families"], p["families"]
     assert "inc" not in p["families"], "fragment dir leaked into families"

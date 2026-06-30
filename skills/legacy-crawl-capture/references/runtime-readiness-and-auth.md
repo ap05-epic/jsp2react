@@ -130,6 +130,37 @@ login are usually platform/GCS assumptions, not credentials.** Look there before
 Credentials for the local app live in the app repo (e.g. a `login.env`); reference
 them via env, never hard-code secrets into a profile.
 
+### 5b. Session-sensitive screens — capture with a FRESH from-start login, not a saved cookie
+
+A saved `auth_state.json` is often just **one `JSESSIONID` cookie**. For a protected, AJAX-hydrated screen
+that depends on session state established by navigating the post-login landing first, replaying that lone
+cookie into a fresh browser context **fails**: the server rejects/rotates it and serves a "Session timeout"
+error page (it issues a new `Set-Cookie` and never fires the contentlet AJAX). The cookie expired, or it was
+never sufficient for that flow.
+
+The tell: the request **sends** your `JSESSIONID`, the server **responds with a new one** + the timeout page,
+and **no contentlet AJAX runs**. That is a session-sensitive screen.
+
+**Fix — let `capture_screen.py` log in fresh, in the same context it captures from:**
+```bash
+capture_screen.py --login --project work/project.json --creds login.env \
+  --url '<dispatcher …deep route>' --record-har --name <view>_legacy --out-dir work/evidence/<view>
+```
+`--login` (or a profile's `"login": true`) does the proven flow — GET the login page → fill
+`loginFields` → submit → land (warming the session) — then navigates the deep route in the **same** browser
+context, so the session is valid for the protected route. Use `--check-login` first to confirm auth alone.
+
+The canonical recovery this mirrors (provable with curl from one cookie jar — login page → POST login →
+reuse the new `JSESSIONID` → GET the dispatcher route returns the real screen):
+```bash
+curl -c jar -b jar  <base>/<ctx>/jsp/login.jsp -o /dev/null
+curl -c jar -b jar -e <base>/<ctx>/jsp/login.jsp -d 'user=$U&password=$P' <base><loginAction>   # warms the session
+curl -c jar -b jar  '<base>/<ctx>/dispatcherAction.do?login=true&page=<flow>'                    # real screen HTML
+```
+If even `--login` stalls, it's not auth — the capture now writes partial artifacts + a `nav_error` (exit 2)
+instead of hanging, so inspect the `_rejected/` HAR/PNG to see where it died. Browser not launching at all →
+`python -m playwright install chromium` (Linux: also `playwright install-deps`) or `--channel chrome|msedge`.
+
 ---
 
 ## 6. Styled-vs-unstyled detection

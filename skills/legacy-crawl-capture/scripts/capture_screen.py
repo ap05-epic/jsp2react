@@ -122,12 +122,13 @@ def parse_viewport(s):
     return {"width": int(w), "height": int(h)}
 
 
-def run_workflow(page, steps):
+def run_workflow(page, steps, timeout, settle_ms):
     """Navigate to a deep state before capture. Action vocabulary mirrors webapp-snapshot."""
     for st in steps:
         a = st.get("action")
         if a == "navigate":
-            page.goto(st["url"], wait_until="networkidle")
+            page.goto(st["url"], wait_until="domcontentloaded")
+            settle(page, timeout, settle_ms)
         elif a == "click":
             page.click(st["selector"])
         elif a == "fill":
@@ -156,6 +157,101 @@ def load_project(path):
         return {}
 
 
+def settle(page, timeout, settle_ms):
+    """Bounded, swallowed network-settle (mirrors crawl_ajax.settle). A session-sensitive / AJAX page with
+    keepalive or long-poll XHR never reaches 'networkidle', so wait_until='networkidle' on goto blocks
+    forever — this caps the wait and degrades instead of hanging."""
+    try:
+        page.wait_for_load_state("networkidle", timeout=timeout)
+    except Exception:
+        pass
+    if settle_ms:
+        page.wait_for_timeout(settle_ms)
+
+
+def launch_browser(p, channel=None):
+    """Launch bundled Chromium; if it isn't installed, fall back to a system Chrome/Edge channel."""
+    attempts = [dict(channel=channel)] if channel else [dict(), dict(channel="chrome"), dict(channel="msedge")]
+    last = None
+    for kw in attempts:
+        try:
+            return p.chromium.launch(headless=True, **kw)
+        except Exception as e:
+            last = e
+    raise SystemExit("Could not launch a browser (%s). Install one with:  python -m playwright install chromium  "
+                     "(Linux: also `playwright install-deps`), or pass --channel chrome|msedge for a system browser." % last)
+
+
+def load_creds(path):
+    """Resolve login creds from a KEY=VALUE env file (default login.env). Values are never logged or printed."""
+    vals = {}
+    p = path or "login.env"
+    if os.path.exists(p):
+        for line in open(p, encoding="utf-8", errors="replace"):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            vals[k.strip()] = v.strip().strip('"').strip("'")
+    return vals
+
+
+def login_url_for(proj):
+    if proj.get("loginUrl"):
+        return proj["loginUrl"]
+    base = (proj.get("legacyBaseUrl") or "").rstrip("/")
+    ctx = proj.get("contextRoot") or ""
+    return base + ctx + "/jsp/login.jsp"   # convention fallback when init_project didn't record loginUrl
+
+
+def do_login(page, proj, creds, timeout, settle_ms):
+    """Fresh from-start login IN this browser context, warming the session for protected routes — the robust
+    path for session-sensitive screens where a saved single-cookie auth_state is stale/insufficient. Mirrors
+    the proven flow: GET login page -> fill -> submit -> land."""
+    fields = proj.get("loginFields") or {}
+    uf, pf = fields.get("user", "username"), fields.get("password", "password")
+    user = creds.get(uf) or creds.get("user") or creds.get("LEGACY_USER") or os.environ.get("LEGACY_USER")
+    pw   = creds.get(pf) or creds.get("password") or creds.get("LEGACY_PASS") or os.environ.get("LEGACY_PASS")
+    if not user or not pw:
+        raise SystemExit("--login needs credentials: set %s/%s (or user/password, or LEGACY_USER/LEGACY_PASS) "
+                         "in --creds env file or the environment (do NOT commit them)." % (uf, pf))
+    page.goto(login_url_for(proj), wait_until="domcontentloaded")
+    settle(page, timeout, settle_ms)
+    page.fill("input[name='%s']" % uf, user)
+    page.fill("input[name='%s']" % pf, pw)
+    try:
+        page.click("input[type=submit], button[type=submit], button:not([type])", timeout=timeout)
+    except Exception:
+        page.press("input[name='%s']" % pf, "Enter")   # form with no explicit submit button
+    settle(page, timeout, settle_ms)
+
+
+def redact_har(har_path, login_basename):
+    """Strip credentials from the saved HAR: the login POST body + cookie/auth headers on the login request.
+    The repo is public and HAR embeds request bodies — the password must never land in an artifact."""
+    if not login_basename or not os.path.exists(har_path):
+        return
+    try:
+        har = json.load(open(har_path, encoding="utf-8"))
+        for e in har.get("log", {}).get("entries", []):
+            req = e.get("request", {})
+            if login_basename in (req.get("url") or "").lower():
+                if req.get("postData"):
+                    req["postData"]["text"] = "[REDACTED]"
+                    for pp in (req["postData"].get("params") or []):
+                        pp["value"] = "[REDACTED]"
+                for h in (req.get("headers") or []):
+                    if h.get("name", "").lower() in ("cookie", "authorization"):
+                        h["value"] = "[REDACTED]"
+        json.dump(har, open(har_path, "w", encoding="utf-8"), indent=1)
+    except Exception:
+        pass
+
+
+def safe_sha(p):
+    return sha256(p) if os.path.exists(p) else None
+
+
 def main():
     ap = argparse.ArgumentParser(description="Capture one screen state as comparable evidence (png + normalized model + a11y + network + capture metadata) with semantic readiness.")
     ap.add_argument("--url", help="URL to capture (legacy screen OR react render). May instead come from --profile.")
@@ -174,8 +270,13 @@ def main():
     ap.add_argument("--body-cap", type=int, default=500_000, help="Max response body bytes stored per request.")
     ap.add_argument("--record-har", action="store_true", help="Record a HAR of the REAL backend responses (responses.har) so the React app can replay real data with no fakes.")
     ap.add_argument("--error-signature", action="append", default=None, help="Extra text that marks an error/wrong page (repeatable). Matched against title+url+body; a hit QUARANTINES the capture.")
-    ap.add_argument("--project", help="project.json — supplies the app's login route + errorSignatures as quarantine markers (generic, not hardcoded).")
-    ap.add_argument("--self-check", action="store_true", help="Validate environment/args without launching a browser, then exit.")
+    ap.add_argument("--project", help="project.json — supplies the app's login route + errorSignatures as quarantine markers (generic, not hardcoded), and (with --login) the login URL + fields.")
+    ap.add_argument("--login", action="store_true", help="Perform a FRESH from-start login inside the capture context before navigating. The robust path for session-sensitive / AJAX screens; reads loginUrl/loginAction/loginFields from --project. Prefer this over a stale --auth-state.")
+    ap.add_argument("--check-login", action="store_true", help="Auth probe: log in, print the post-login url/title, exit 0 if authenticated (no password field / not an error page) else 2. Verifies auth in ISOLATION from capture.")
+    ap.add_argument("--creds", help="KEY=VALUE env file with login creds (default: login.env). Also honors LEGACY_USER/LEGACY_PASS env vars. Keep it gitignored — never commit creds.")
+    ap.add_argument("--channel", help="Browser channel chrome|msedge instead of bundled Chromium (for pods where only a system browser is installed).")
+    ap.add_argument("--settle-ms", type=int, default=None, help="Fixed wait after the bounded network-settle that follows each navigation (default 1000).")
+    ap.add_argument("--self-check", action="store_true", help="Validate environment/args + gate/login logic without launching a browser, then exit.")
     args = ap.parse_args()
 
     prof = load_profile(args.profile)
@@ -186,6 +287,8 @@ def main():
     wait_for_gone = args.wait_for_gone if args.wait_for_gone is not None else prof.get("waitForGone")
     wait_ms = args.wait_ms if args.wait_ms is not None else int(prof.get("waitMs", 0))
     rt_timeout = args.readiness_timeout
+    settle_ms = args.settle_ms if args.settle_ms is not None else int(prof.get("settleMs", 1000))
+    do_login_flag = args.login or bool(prof.get("login"))
     record_har = args.record_har or bool(prof.get("recordHar"))
     # error signatures (all lowercased, matched against title+url+body):
     #   generic defaults  +  app-specific from project.json (login route basename + errorSignatures)  +  profile  +  CLI.
@@ -207,12 +310,90 @@ def main():
             ok = True
         except Exception:
             ok = False
+
+        # --- exercise the no-browser logic the fix depends on, with a fake page ---
+        class _FakePage:
+            def __init__(self, raise_on=()):
+                self.calls = []; self.raise_on = set(raise_on)
+            def _rec(self, name, *a):
+                self.calls.append((name,) + a)
+                if name in self.raise_on:
+                    raise RuntimeError("boom:" + name)
+            def wait_for_load_state(self, state, timeout=None): self._rec("wait_for_load_state", state)
+            def wait_for_timeout(self, ms): self._rec("wait_for_timeout", ms)
+            def goto(self, u, wait_until=None): self._rec("goto", u)
+            def fill(self, sel, val): self._rec("fill", sel)
+            def click(self, sel, timeout=None): self._rec("click", sel)
+            def press(self, sel, key): self._rec("press", sel)
+
+        # 1. settle() swallows a networkidle timeout and STILL settles (the anti-hang guarantee)
+        fp = _FakePage(raise_on={"wait_for_load_state"})
+        settle(fp, 100, 5)
+        assert any(c[0] == "wait_for_timeout" for c in fp.calls), "settle must not hang/raise on a never-idle page"
+
+        # 2. do_login builds project-driven selectors and submits; missing creds is a clear error
+        sproj = {"loginUrl": "http://h/APP/jsp/login.jsp", "loginFields": {"user": "empId", "password": "pin"}}
+        fp2 = _FakePage()
+        do_login(fp2, sproj, {"empId": "u", "pin": "p"}, 100, 5)
+        joined = " ".join(str(c) for c in fp2.calls)
+        assert "jsp/login.jsp" in joined and "input[name='empId']" in joined and "input[name='pin']" in joined, fp2.calls
+        try:
+            do_login(_FakePage(), sproj, {}, 100, 5)
+            raise AssertionError("do_login should SystemExit on missing creds")
+        except SystemExit:
+            pass
+        assert login_url_for({"legacyBaseUrl": "http://h:8080", "contextRoot": "/APP"}).endswith("/APP/jsp/login.jsp")
+
+        # 3. redact_har strips the login POST password + cookie/auth headers (public repo: no creds in artifacts)
+        import tempfile
+        hp = os.path.join(tempfile.mkdtemp(prefix="cap_sc_"), "t.har")
+        json.dump({"log": {"entries": [
+            {"request": {"url": "http://h/APP/loginAction.do", "method": "POST",
+                         "postData": {"text": "user=u&password=secret", "params": [{"name": "password", "value": "secret"}]},
+                         "headers": [{"name": "Cookie", "value": "JSESSIONID=x"}]}},
+            {"request": {"url": "http://h/APP/dispatcherAction.do", "method": "GET", "headers": []}}]}},
+            open(hp, "w"))
+        redact_har(hp, "loginaction.do")
+        assert "secret" not in open(hp).read(), "password leaked through redaction"
+
         out_base = os.path.join(args.out_dir, args.name) if (args.out_dir and args.name) else None
         print(json.dumps({"self_check": "ok", "viewport": vp, "out_base": out_base, "playwright_importable": ok,
                           "record_har": record_har, "error_signatures": len(error_signatures),
-                          "resolved": {"url": url, "wait_for": wait_for, "must_contain": must_contain,
-                                       "wait_for_gone": wait_for_gone, "wait_ms": wait_ms}}))
+                          "checks": {"settle_swallows": True, "do_login_selectors": True, "creds_guard": True,
+                                     "har_redacted": True},
+                          "resolved": {"url": url, "login": do_login_flag, "wait_for": wait_for,
+                                       "must_contain": must_contain, "wait_for_gone": wait_for_gone, "wait_ms": wait_ms}}))
         return
+
+    if args.check_login:
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as e:
+            raise SystemExit("Playwright not available (%s). pip install playwright && playwright install chromium" % e)
+        creds = load_creds(args.creds)
+        final_url, title, still_login = "", "", True
+        with sync_playwright() as p:
+            browser = launch_browser(p, args.channel)
+            ctx = browser.new_context(viewport=vp)
+            page = ctx.new_page()
+            page.set_default_timeout(rt_timeout); page.set_default_navigation_timeout(rt_timeout)
+            try:
+                do_login(page, proj, creds, rt_timeout, settle_ms)
+                final_url, title = page.url, (page.title() or "")
+                still_login = page.query_selector("input[type=password]") is not None
+            finally:
+                try: ctx.close()
+                except Exception: pass
+                try: browser.close()
+                except Exception: pass
+        # landing IS often loginAction.do, so don't treat that route as "error"; judge by the password field +
+        # the hard error signatures only (exclude the login-route basename).
+        hard_errors = [s for s in error_signatures if s and s != proj_login]
+        is_error = any(s in (title + " " + final_url).lower() for s in hard_errors)
+        authed = (not still_login) and (not is_error)
+        print(json.dumps({"check_login": "ok", "final_url": final_url, "title": title,
+                          "authenticated": authed, "password_field_present": still_login, "error_page": is_error}))
+        sys.exit(0 if authed else 2)
 
     if not args.out_dir or not args.name:
         raise SystemExit("--out-dir and --name are required for a capture")
@@ -236,11 +417,19 @@ def main():
     elif isinstance(prof.get("workflow"), str):
         steps = json.load(open(prof["workflow"]))
     network, assets = [], []
+    creds = load_creds(args.creds) if do_login_flag else {}
 
     doc_status = {"code": None}  # status of the top-level navigation document (mutable holder)
+    base = os.path.join(args.out_dir, args.name)   # re-pointed to _rejected/ after load if it's an error/partial page
+    readiness = {"wait_for": None, "must_contain": {}, "wait_for_gone": None, "fonts": False, "settle_ms": wait_ms}
+    warnings, nav_error, error_page, sig_hit = [], None, False, None
+    final_url, title, body_sample, body_font = url, "", "", ""
+    asset_fail, stylesheets, scripts = [], 0, 0
+    model = {"title": "", "url": url, "viewport": {}, "elements": [], "tables": [], "forms": []}
+    a11y = None
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = launch_browser(p, args.channel)
         ctx_kwargs = {"viewport": vp, "device_scale_factor": 1}
         if args.auth_state:
             ctx_kwargs["storage_state"] = args.auth_state
@@ -248,6 +437,8 @@ def main():
             ctx_kwargs.update(record_har_path=har_path, record_har_content="embed", record_har_mode="full")
         ctx = browser.new_context(**ctx_kwargs)
         page = ctx.new_page()
+        page.set_default_timeout(rt_timeout)
+        page.set_default_navigation_timeout(rt_timeout)
 
         def on_response(resp):
             try:
@@ -269,98 +460,125 @@ def main():
                 pass  # opaque/redirected responses can't be read; skip quietly
 
         page.on("response", on_response)
-
-        if steps:
-            run_workflow(page, steps)
-        else:
-            page.goto(url, wait_until="networkidle")
-
-        # --- semantic readiness, in order: selector -> text markers -> spinner gone -> fonts -> settle ---
-        # ("page loaded" != "screen usable"; networkidle alone misses async-hydrated widgets)
-        readiness = {"wait_for": None, "must_contain": {}, "wait_for_gone": None, "fonts": False, "settle_ms": wait_ms}
-        warnings = []
-        if wait_for:
+        try:
             try:
-                page.wait_for_selector(wait_for, timeout=rt_timeout); readiness["wait_for"] = True
-            except Exception:
-                readiness["wait_for"] = False; warnings.append(f"selector never appeared: {wait_for}")
-        for marker in (must_contain or []):
+                if do_login_flag:
+                    do_login(page, proj, creds, rt_timeout, settle_ms)   # fresh from-start login, warms the session
+                if steps:
+                    run_workflow(page, steps, rt_timeout, settle_ms)
+                else:
+                    page.goto(url, wait_until="domcontentloaded")
+                    settle(page, rt_timeout, settle_ms)                  # bounded — never hangs on a never-idle page
+
+                # --- semantic readiness, in order: selector -> text markers -> spinner gone -> fonts -> settle ---
+                # ("page loaded" != "screen usable"; networkidle alone misses async-hydrated widgets)
+                if wait_for:
+                    try:
+                        page.wait_for_selector(wait_for, timeout=rt_timeout); readiness["wait_for"] = True
+                    except Exception:
+                        readiness["wait_for"] = False; warnings.append(f"selector never appeared: {wait_for}")
+                for marker in (must_contain or []):
+                    try:
+                        page.wait_for_function("t => document.body && document.body.innerText.includes(t)",
+                                               arg=marker, timeout=rt_timeout)
+                        readiness["must_contain"][marker] = True
+                    except Exception:
+                        readiness["must_contain"][marker] = False
+                        warnings.append(f"text marker never appeared: {marker!r}")
+                if wait_for_gone:
+                    try:
+                        page.wait_for_selector(wait_for_gone, state="hidden", timeout=rt_timeout); readiness["wait_for_gone"] = True
+                    except Exception:
+                        readiness["wait_for_gone"] = False; warnings.append(f"element never disappeared: {wait_for_gone}")
+                try:
+                    page.evaluate("document.fonts ? document.fonts.ready : null"); readiness["fonts"] = True
+                except Exception:
+                    pass
+                if wait_ms:
+                    page.wait_for_timeout(wait_ms)
+            except Exception as e:
+                nav_error = "%s: %s" % (type(e).__name__, e)
+                warnings.append("navigation/capture error -> " + nav_error)
+
+            # styled-vs-unstyled / asset health (partial but still informative even after a nav_error)
+            asset_fail = [a for a in assets if a["resource_type"] in ("stylesheet", "script") and a["status"] >= 400]
+            stylesheets = sum(1 for a in assets if a["resource_type"] == "stylesheet")
+            scripts = sum(1 for a in assets if a["resource_type"] == "script")
+            if asset_fail:
+                warnings.append(f"{len(asset_fail)} CSS/JS asset(s) returned >=400 — page may be unstyled/broken")
             try:
-                page.wait_for_function("t => document.body && document.body.innerText.includes(t)",
-                                       arg=marker, timeout=rt_timeout)
-                readiness["must_contain"][marker] = True
+                body_font = page.evaluate("getComputedStyle(document.body).fontFamily") or ""
             except Exception:
-                readiness["must_contain"][marker] = False
-                warnings.append(f"text marker never appeared: {marker!r}")
-        if wait_for_gone:
+                body_font = ""
             try:
-                page.wait_for_selector(wait_for_gone, state="hidden", timeout=rt_timeout); readiness["wait_for_gone"] = True
+                final_url = page.url
             except Exception:
-                readiness["wait_for_gone"] = False; warnings.append(f"element never disappeared: {wait_for_gone}")
-        try:
-            page.evaluate("document.fonts ? document.fonts.ready : null"); readiness["fonts"] = True
-        except Exception:
-            pass
-        if wait_ms:
-            page.wait_for_timeout(wait_ms)
+                pass
+            try:
+                title = page.title()
+            except Exception:
+                title = ""
+            try:
+                body_sample = page.evaluate("document.body ? document.body.innerText.slice(0,4000) : ''") or ""
+            except Exception:
+                body_sample = ""
+            # --- error/partial detection: a page can satisfy 'loaded' yet be a 500 / login / wrong view;
+            #     a nav stall/timeout (nav_error) is ALSO treated as rejected so it never poses as evidence ---
+            blob = (title + " " + final_url + " " + body_sample).lower()
+            sig_hit = next((s for s in error_signatures if s and s in blob), None)
+            http_err = (doc_status["code"] is not None and doc_status["code"] >= 400)
+            error_page = bool(sig_hit or http_err or nav_error)
+            if error_page:
+                warnings.append("error/partial page (status=%s, signature=%r, nav_error=%s) -> quarantined to _rejected/"
+                                % (doc_status["code"], sig_hit, bool(nav_error)))
 
-        # styled-vs-unstyled / asset health
-        asset_fail = [a for a in assets if a["resource_type"] in ("stylesheet", "script") and a["status"] >= 400]
-        stylesheets = sum(1 for a in assets if a["resource_type"] == "stylesheet")
-        scripts = sum(1 for a in assets if a["resource_type"] == "script")
-        if asset_fail:
-            warnings.append(f"{len(asset_fail)} CSS/JS asset(s) returned >=400 — page may be unstyled/broken")
-        try:
-            body_font = page.evaluate("getComputedStyle(document.body).fontFamily") or ""
-        except Exception:
-            body_font = ""
+            # quarantined captures go under _rejected/ so they are NOT promoted as the view's evidence
+            target_dir = os.path.join(args.out_dir, "_rejected") if error_page else args.out_dir
+            os.makedirs(target_dir, exist_ok=True)
+            base = os.path.join(target_dir, args.name)
 
-        final_url = page.url
-        try:
-            title = page.title()
-        except Exception:
-            title = ""
-        try:
-            body_sample = page.evaluate("document.body ? document.body.innerText.slice(0,4000) : ''") or ""
-        except Exception:
-            body_sample = ""
-        # --- error-page detection: a page can satisfy 'loaded' yet be a 500 / login / wrong view ---
-        # (the user's exact complaint: error pages were being promoted as the final view)
-        blob = (title + " " + final_url + " " + body_sample).lower()
-        sig_hit = next((s for s in error_signatures if s and s in blob), None)
-        http_err = (doc_status["code"] is not None and doc_status["code"] >= 400)
-        error_page = bool(sig_hit or http_err)
-        if error_page:
-            warnings.append("error-page detected (status=%s, signature=%r) -> quarantined to _rejected/"
-                            % (doc_status["code"], sig_hit))
+            # defensive writes — whatever DID render is still evidence after a stall/timeout (each guarded)
+            try:
+                page.screenshot(path=base + ".png", full_page=args.full_page)
+            except Exception as e:
+                warnings.append("screenshot failed: %s" % e)
+            try:
+                open(base + ".dom.html", "w", encoding="utf-8").write(page.content())
+            except Exception as e:
+                warnings.append("dom dump failed: %s" % e)
+            try:
+                model = page.evaluate(EXTRACTOR_JS, STYLE_PROPS)
+            except Exception as e:
+                warnings.append("model extract failed: %s" % e)
+            json.dump(model, open(base + ".model.json", "w", encoding="utf-8"), indent=1)
+            try:
+                a11y = page.accessibility.snapshot()
+            except Exception:
+                a11y = None
+            json.dump(a11y, open(base + ".a11y.json", "w", encoding="utf-8"), indent=1)
+            json.dump(network, open(base + ".network.json", "w", encoding="utf-8"), indent=1)
+        finally:
+            try:
+                ctx.close()        # HAR flushes ONLY on context close — must run even on a stall/timeout
+            except Exception:
+                pass
+            try:
+                browser.close()
+            except Exception:
+                pass
 
-        # quarantined captures go under _rejected/ so they are NOT promoted as the view's evidence
-        target_dir = os.path.join(args.out_dir, "_rejected") if error_page else args.out_dir
-        os.makedirs(target_dir, exist_ok=True)
-        base = os.path.join(target_dir, args.name)
-
-        page.screenshot(path=base + ".png", full_page=args.full_page)
-        open(base + ".dom.html", "w", encoding="utf-8").write(page.content())
-        model = page.evaluate(EXTRACTOR_JS, STYLE_PROPS)
-        json.dump(model, open(base + ".model.json", "w", encoding="utf-8"), indent=1)
-        try:
-            a11y = page.accessibility.snapshot()
-        except Exception:
-            a11y = None
-        json.dump(a11y, open(base + ".a11y.json", "w", encoding="utf-8"), indent=1)
-        json.dump(network, open(base + ".network.json", "w", encoding="utf-8"), indent=1)
-        ctx.close()
-        browser.close()
-
-    # HAR is flushed on context close; relocate it next to the (possibly quarantined) artifacts
+    # HAR flushed on context close. Redact creds from the login request, then relocate next to the artifacts.
+    if record_har and do_login_flag:
+        redact_har(har_path, proj_login)
     har_out = None
     if record_har and os.path.exists(har_path):
         har_out = base + ".har"
         if os.path.abspath(har_out) != os.path.abspath(har_path):
             os.replace(har_path, har_out)
 
-    # usable = readiness passed AND no CSS/JS failed AND it is not an error page (real parity evidence)
-    usable = (readiness["wait_for"] is not False
+    # usable = no nav error/stall AND readiness passed AND no CSS/JS failed AND not an error page
+    usable = (not nav_error
+              and readiness["wait_for"] is not False
               and all(readiness["must_contain"].values())
               and readiness["wait_for_gone"] is not False
               and not asset_fail
@@ -369,22 +587,23 @@ def main():
     meta = {
         "name": args.name, "url": url, "final_url": final_url, "title": title,
         "viewport": args.viewport or prof.get("viewport") or "1920x1080",
-        "auth_state": bool(args.auth_state), "profile": args.profile,
+        "auth_state": bool(args.auth_state), "login": do_login_flag, "profile": args.profile,
         "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
-        "readiness": readiness, "usable": usable, "rejected": error_page,
-        "error": {"is_error_page": error_page, "doc_status": doc_status["code"], "signature_hit": sig_hit},
+        "readiness": readiness, "usable": usable, "rejected": error_page, "nav_error": nav_error,
+        "error": {"is_error_page": error_page, "doc_status": doc_status["code"], "signature_hit": sig_hit, "nav_error": nav_error},
         "warnings": warnings,
         "assets": {"ok": not asset_fail, "failed": asset_fail[:20], "stylesheets": stylesheets, "scripts": scripts},
         "body_font_family": body_font, "har": har_out,
-        "sha256": {"png": sha256(base + ".png"), "dom": sha256(base + ".dom.html")},
-        "elements": len(model["elements"]), "tables": len(model["tables"]), "network_records": len(network),
+        "sha256": {"png": safe_sha(base + ".png"), "dom": safe_sha(base + ".dom.html")},
+        "elements": len(model.get("elements", [])), "tables": len(model.get("tables", [])), "network_records": len(network),
     }
     json.dump(meta, open(base + ".capture.json", "w", encoding="utf-8"), indent=1)
 
-    print(json.dumps({"ok": True, "name": args.name, "usable": usable, "rejected": error_page,
-                      "error_page": error_page, "warnings": warnings,
+    print(json.dumps({"ok": not nav_error, "name": args.name, "usable": usable, "rejected": error_page,
+                      "error_page": error_page, "nav_error": nav_error, "warnings": warnings,
                       "png": base + ".png", "model": base + ".model.json", "capture": base + ".capture.json",
                       "har": har_out, "elements": meta["elements"], "network_records": meta["network_records"]}, indent=1))
+    sys.exit(0 if usable else 2)
 
 
 if __name__ == "__main__":

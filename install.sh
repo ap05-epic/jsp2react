@@ -69,10 +69,23 @@ fi
 echo ">> prerequisite checks"
 command -v node    >/dev/null 2>&1 && echo "   node:    $(node -v)"        || echo "   !! node missing (React app + pixel diff)"
 command -v python3 >/dev/null 2>&1 && echo "   python3: $(python3 -V 2>&1)" || { command -v python >/dev/null 2>&1 && echo "   python:  $(python -V 2>&1)" || echo "   !! python missing (capture/extract/diff scripts)"; }
-if python3 -c "import playwright" >/dev/null 2>&1 || python -c "import playwright" >/dev/null 2>&1; then
+PYBIN="$(command -v python3 || command -v python || true)"
+if [ -n "$PYBIN" ] && "$PYBIN" -c "import playwright" >/dev/null 2>&1; then
   echo "   playwright: ok"
+  # the package being present does NOT mean a browser binary is installed (the exact pod failure) — verify one launches
+  if "$PYBIN" -c "from playwright.sync_api import sync_playwright;
+import sys
+try:
+    with sync_playwright() as p: p.chromium.launch(headless=True).close()
+except Exception as e:
+    sys.exit(1)" >/dev/null 2>&1; then
+    echo "   browser:    chromium launches ok"
+  else
+    echo "   !! no launchable browser -> $PYBIN -m playwright install chromium   (Linux: also: $PYBIN -m playwright install-deps;"
+    echo "      or capture with --channel chrome|msedge to use a system browser)"
+  fi
 else
-  echo "   !! playwright missing -> pip install playwright && playwright install chromium"
+  echo "   !! playwright missing -> pip install playwright && $PYBIN -m playwright install chromium"
 fi
 if [ "$MODE" = "full" ]; then
   command -v java  >/dev/null 2>&1 && echo "   java:    $(java -version 2>&1 | head -1)" || echo "   !! JDK missing (Spring Boot target — install a JDK 17+)"

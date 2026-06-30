@@ -54,8 +54,10 @@ READ status.md
 4. **Discover every view**: `crawl_screens.py --emit-viewgraph` + `crawl_ajax.py --merge` → `viewgraph.json`
    (AJAX views from the START; never open deep links directly; each view carries its from-start click-path).
 5. **Per view**: `extract_jsp.py` → `<view>/source-model.json` (the build input).
-6. **Capture + REAL responses**: capture profile (workflow = the from-start path), `capture_screen.py --profile
-   --record-har`. Error pages quarantined to `_rejected/` — look around again, don't accept them. Confirm `usable:true`.
+6. **Capture + REAL responses**: capture profile, `capture_screen.py --profile --record-har`. For
+   session-sensitive / AJAX screens use **`--login --project --creds`** (fresh from-start login; a saved
+   `auth_state` may be a stale single cookie; `--check-login` verifies auth first). Error pages quarantined to
+   `_rejected/` — look around again, don't accept them. Confirm `usable:true` (`nav_error`/exit 2 = a stall).
 7. **Contract**: `spec.md` (per-view source model + capture contract + data contract) and `status.md` (control-level
    inventory — one row per control/state). `build_index.py` → `evidence/INDEX.html`. Reconcile JSP/action counts.
 

@@ -1,12 +1,13 @@
 {
   "_schema": {
     "purpose": "A per-screen CAPTURE CONTRACT: how to deterministically reach and capture one legacy screen so the evidence is real (usable, not just 'rendered'). The driver agent writes one of these per screen; capture_screen.py reads it with --profile; the agent reuses the SAME profile to capture the React side, guaranteeing comparable captures.",
-    "consumed_by_capture_screen": ["url", "viewport", "workflow", "waitFor", "mustContain", "waitForGone", "waitMs", "recordHar", "errorSignatures"],
+    "consumed_by_capture_screen": ["url", "viewport", "login", "workflow", "waitFor", "mustContain", "waitForGone", "waitMs", "settleMs", "recordHar", "errorSignatures"],
     "documentation_only": ["id", "screen", "canonicalRoute", "authContext", "expectedAssets", "knownFailureModes", "notes", "dataMode"],
     "rules": [
       "Prefer semantic readiness (waitFor + mustContain + waitForGone) over a big waitMs; waitMs is the LAST small settle, not the strategy.",
+      "login:true (with --project) makes capture_screen do a FRESH from-start login before navigating — the robust path for session-sensitive / AJAX screens. A saved auth_state.json can be a stale single cookie the server rotates on protected routes; prefer login:true over --auth-state there. Equivalent CLI flag: --login.",
       "Record the canonical route AND the misleading routes (e.g. a direct *.do that shows an error page).",
-      "workflow may be an inline list of steps (navigate/click/fill/select/wait) OR a path to a steps JSON.",
+      "workflow may be an inline list of steps (navigate/click/fill/select/wait) OR a path to a steps JSON. For a plain login, prefer login:true over hand-templating credentials into a workflow.",
       "Use the same profile (minus url) for the legacy and react captures.",
       "recordHar:true records the REAL backend responses (legacy.har) for record-mode replay (no fake data).",
       "errorSignatures[] = text that marks a wrong/error page; a hit QUARANTINES the capture to _rejected/ instead of promoting it. The app's login route is added automatically from project.loginAction.",
@@ -35,9 +36,10 @@
       "id": "summary_default",
       "screen": "<Flow> Summary (example entity)",
       "canonicalRoute": "dispatcherAction.do?page=summary&id=<entity>&level=<level>",
-      "authContext": "authenticated via the REAL login-form submit; entity context <entity>. Reuse auth_state.json (--auth-state).",
+      "authContext": "authenticated. For a session-sensitive / AJAX screen use login:true (fresh from-start login) — capture_screen warms the session, then navigates here in the same context. (--auth-state only suits screens a saved cookie can carry.)",
       "url": "http://127.0.0.1:8080/<ctx>/dispatcherAction.do?page=summary&id=<entity>&level=<level>",
       "viewport": "1920x1080",
+      "login": true,
       "workflow": null,
       "waitFor": "#mainmenu",
       "mustContain": ["<a label that proves the real screen loaded>"],
@@ -73,7 +75,7 @@
       "waitForGone": ".loadingMask",
       "waitMs": 5000,
       "knownFailureModes": ["The app may try to recover auth via platform paths that don't exist on localhost — see runtime-readiness-and-auth.md."],
-      "notes": "Use this when you must prove the real login navigation rather than reusing a saved session."
+      "notes": "Hand-templated login. Prefer the simpler login:true (reads loginUrl/loginFields from project.json, creds from --creds/env) unless you need a non-standard multi-step login. Use this only when you must script an unusual login navigation."
     }
   ]
 }

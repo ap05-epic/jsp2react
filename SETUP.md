@@ -122,8 +122,13 @@ for f in legacy-crawl-capture/scripts/init_project legacy-crawl-capture/scripts/
   python $S/$f.py --self-check ; done    # expect 13x "self_check: ok"
 node $S/parity-verify/scripts/pixel_diff.js --self-check
 
-# 1. login once (the session everything reuses)
-python $S/webapp-snapshot/scripts/save_auth_state.py --url <login-url> --output work/auth_state.json
+# 0c. ensure a browser is installed for capture (the kit drives Playwright)
+python -m playwright install chromium          # Linux: also `playwright install-deps`  (or use --channel chrome|msedge)
+
+# 1. login once (the session everything reuses). For SESSION-SENSITIVE / AJAX screens, skip the saved state and
+#    capture with --login (below) — a saved single-cookie auth_state is often rotated by the server. Probe auth first:
+python $S/webapp-snapshot/scripts/save_auth_state.py --url <login-url> --output work/auth_state.json   # simple screens
+python $S/legacy-crawl-capture/scripts/capture_screen.py --check-login --project $P --creds login.env   # exit 0 = authenticated
 
 # 2. THEME from the legacy CSS source (colors/fonts come from here)
 python $S/react-replica-kit/scripts/extract_theme.py --css-dir <webapp>/theme --out-dir work/evidence/theme
@@ -138,10 +143,13 @@ python $S/legacy-crawl-capture/scripts/crawl_ajax.py --start-url <post-login sta
 python $S/legacy-crawl-capture/scripts/extract_jsp.py --jsp <webapp>/jsp/<flow>.jsp \
   --webapp-dir <webapp> --out work/evidence/<flow>_default/source-model.json
 
-# 5. CAPTURE that view (real responses via --record-har; error pages auto-quarantine to _rejected/)
+# 5. CAPTURE that view (real responses via --record-har; error pages auto-quarantine to _rejected/).
+#    --login = FRESH from-start login in the capture context (robust for session-sensitive/AJAX screens; the login
+#    POST is redacted from the HAR). Swap to --auth-state work/auth_state.json for simple, non-session-sensitive screens.
 python $S/legacy-crawl-capture/scripts/capture_screen.py --profile work/profiles/<flow>_default.json \
-  --out-dir work/evidence/<flow>_default --name legacy --auth-state work/auth_state.json --project $P --record-har
-#   -> check work/evidence/<flow>_default/legacy.capture.json has "usable": true (not an error page)
+  --out-dir work/evidence/<flow>_default --name legacy --login --creds login.env --project $P --record-har
+#   -> check work/evidence/<flow>_default/legacy.capture.json has "usable": true (not an error page).
+#      exit 2 + "nav_error" = a stall: inspect the partial artifacts in _rejected/ (it no longer hangs).
 
 # 6. FRONTEND: real data (record) + scaffold the app with the theme + project defaults
 python $S/legacy-crawl-capture/scripts/capture_fixtures.py \

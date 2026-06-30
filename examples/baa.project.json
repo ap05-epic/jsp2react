@@ -5,7 +5,8 @@
   "legacySourceDir": "/home/devpod/.copilot/BAX-Test-MainRepo/BAX-BusinessAnalysis/BAA/src/main/webapp",
 
   "loginAction": "/BAA/loginAction.do",
-  "loginFields": { "user": "userId", "password": "password" },
+  "loginUrl": "http://127.0.0.1:8080/BAA/jsp/login.jsp",
+  "loginFields": { "user": "user", "password": "password" },
 
   "families": ["fa", "cefs", "latam", "nnm", "shhp", "contentlet", "ipad"],
   "pathConventions": {

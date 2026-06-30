@@ -47,10 +47,17 @@ def har_records(paths):
                     text = base64.b64decode(text).decode("utf-8", "replace")
                 except Exception:
                     text = None
-            recs.append({"method": req.get("method", "GET"), "url": req.get("url", ""),
+            method = req.get("method", "GET")
+            # Prefer Playwright's own resource type (xhr/fetch/document/stylesheet/...). Fall back to a
+            # heuristic ONLY when it's absent: a GET text/html navigation is the skippable page document, but an
+            # XHR HTML FRAGMENT (legacy contentlets are POST and/or return text/html) is REAL DATA — it must not
+            # be misclassified as the document and dropped.
+            rt = e.get("_resourceType")
+            if not rt:
+                rt = "document" if (mime.startswith("text/html") and method.upper() == "GET") else "xhr"
+            recs.append({"method": method, "url": req.get("url", ""),
                          "status": resp.get("status", 200),
-                         "resource_type": "document" if mime.startswith("text/html") else "xhr",
-                         "content_type": mime, "body": text})
+                         "resource_type": rt, "content_type": mime, "body": text})
     return recs
 
 
@@ -99,7 +106,26 @@ def main():
         fx2 = build(har_records([tf]), False)
         os.remove(tf)
         assert "GET /api/comp" in fx2 and fx2["GET /api/comp"]["body"] == {"ok": True}, fx2
-        print(json.dumps({"self_check": "ok", "network_keys": list(fx), "har_keys": list(fx2)}))
+
+        # regression: a POST text/html CONTENTLET is real data (kept); the GET text/html PAGE document and
+        # static assets are dropped — this is the bug where AJAX HTML fragments were misclassified as documents.
+        har3 = {"log": {"entries": [
+            {"request": {"method": "GET", "url": "http://h/app/dispatcher.do?page=fasummary"},
+             "response": {"status": 200, "content": {"mimeType": "text/html", "text": "<html>page</html>"}}},
+            {"request": {"method": "POST", "url": "http://h/app/ajaxProfileAction.do"},
+             "response": {"status": 200, "content": {"mimeType": "text/html", "text": "<div>profile</div>"}}},
+            {"_resourceType": "stylesheet", "request": {"method": "GET", "url": "http://h/app/app.css"},
+             "response": {"status": 200, "content": {"mimeType": "text/css", "text": "body{}"}}},
+        ]}}
+        tf3 = os.path.join(tempfile.gettempdir(), "j2r_selfcheck3.har")
+        json.dump(har3, open(tf3, "w"))
+        fx3 = build(har_records([tf3]), False)
+        os.remove(tf3)
+        assert "POST /app/ajaxProfileAction.do" in fx3, ("contentlet AJAX dropped", fx3)
+        assert "GET /app/dispatcher.do" not in fx3 and "GET /app/app.css" not in fx3, ("page/asset leaked", fx3)
+        assert len(fx3) == 1, fx3
+        print(json.dumps({"self_check": "ok", "network_keys": list(fx), "har_keys": list(fx2),
+                          "regression_keys": list(fx3)}))
         return
 
     if not args.out:
@@ -115,12 +141,18 @@ def main():
                       "keys": list(fixtures)[:20]}, indent=1))
 
 
+DATA_TYPES = {"xhr", "fetch"}  # the calls a React app actually replays for DATA
+
+
 def build(recs, include_documents):
     fixtures = {}
     for rec in recs:
         rt = rec.get("resource_type")
-        if rt == "document" and not include_documents:
-            continue
+        if rt == "document":
+            if not include_documents:
+                continue
+        elif rt not in DATA_TYPES:
+            continue  # skip assets (stylesheet/script/image/font/...) — not data the React app replays
         key, query = key_for(rec)
         body, ct = body_value(rec)
         if key not in fixtures:

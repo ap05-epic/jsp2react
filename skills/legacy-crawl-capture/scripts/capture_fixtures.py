@@ -54,7 +54,19 @@ def har_records(paths):
             # be misclassified as the document and dropped.
             rt = e.get("_resourceType")
             if not rt:
-                rt = "document" if (mime.startswith("text/html") and method.upper() == "GET") else "xhr"
+                low = mime.split(";", 1)[0].strip().lower()
+                if low == "text/html":
+                    rt = "document" if method.upper() == "GET" else "xhr"   # a POST html fragment is DATA
+                elif low == "text/css":
+                    rt = "stylesheet"
+                elif "javascript" in low or low == "application/ecmascript":
+                    rt = "script"
+                elif low.startswith("image/"):
+                    rt = "image"
+                elif low.startswith("font/") or "font" in low:
+                    rt = "font"
+                else:
+                    rt = "xhr"   # json / xml / plain / form-encoded = DATA
             recs.append({"method": method, "url": req.get("url", ""),
                          "status": resp.get("status", 200),
                          "resource_type": rt, "content_type": mime, "body": text})
@@ -109,20 +121,23 @@ def main():
 
         # regression: a POST text/html CONTENTLET is real data (kept); the GET text/html PAGE document and
         # static assets are dropped — this is the bug where AJAX HTML fragments were misclassified as documents.
+        #   (assets carry NO _resourceType here, so they exercise the mime-based fallback)
         har3 = {"log": {"entries": [
             {"request": {"method": "GET", "url": "http://h/app/dispatcher.do?page=fasummary"},
              "response": {"status": 200, "content": {"mimeType": "text/html", "text": "<html>page</html>"}}},
             {"request": {"method": "POST", "url": "http://h/app/ajaxProfileAction.do"},
              "response": {"status": 200, "content": {"mimeType": "text/html", "text": "<div>profile</div>"}}},
-            {"_resourceType": "stylesheet", "request": {"method": "GET", "url": "http://h/app/app.css"},
+            {"request": {"method": "GET", "url": "http://h/app/app.css"},
              "response": {"status": 200, "content": {"mimeType": "text/css", "text": "body{}"}}},
+            {"request": {"method": "GET", "url": "http://h/app/jquery.min.js"},
+             "response": {"status": 200, "content": {"mimeType": "application/javascript", "text": "var x=1"}}},
         ]}}
         tf3 = os.path.join(tempfile.gettempdir(), "j2r_selfcheck3.har")
         json.dump(har3, open(tf3, "w"))
         fx3 = build(har_records([tf3]), False)
         os.remove(tf3)
         assert "POST /app/ajaxProfileAction.do" in fx3, ("contentlet AJAX dropped", fx3)
-        assert "GET /app/dispatcher.do" not in fx3 and "GET /app/app.css" not in fx3, ("page/asset leaked", fx3)
+        assert not any(k.endswith((".css", ".js")) or "dispatcher.do" in k for k in fx3), ("page/asset leaked", fx3)
         assert len(fx3) == 1, fx3
         print(json.dumps({"self_check": "ok", "network_keys": list(fx), "har_keys": list(fx2),
                           "regression_keys": list(fx3)}))

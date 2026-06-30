@@ -106,11 +106,13 @@ asset failed** — a `usable:false` PNG is not admissible parity evidence.
 
 - **`--login` (+ `--project`, `--creds`)** does a FRESH from-start login in the capture context (warms the
   session), then navigates the target — the robust path for **session-sensitive / AJAX screens** where a saved
-  `--auth-state` is a stale single cookie the server rotates. Reads `loginUrl`/`loginFields` from project.json;
-  creds from a gitignored `login.env` (or `LEGACY_USER`/`LEGACY_PASS` env). `--creds login.env` is **searched near
-  project.json + a few parent levels** if it isn't at the given path (so the app-root `login.env` is found). The
-  login POST is **redacted from the saved HAR**. `--check-login` runs just the login as an auth probe (it does NOT
-  treat an authenticated landing on the login-action route as an error). `profiles` can set `"login": true` instead.
+  `--auth-state` is a stale single cookie the server rotates. Reads `loginUrl`/`loginFields` from project.json.
+  **Creds resolution (first that works):** `--creds <path>` → `project.credsFile` (relative to project.json) →
+  auto-search for `login.env` near project.json + a few parent levels → `LEGACY_USER`/`LEGACY_PASS` env. Keys are
+  matched case-insensitively with variants (`user`/`username`/`userId`, `password`/`pass`/…). **The creds file must
+  be gitignored — never commit it; project.json stores only its path.** The login POST is **redacted from the saved
+  HAR**. `--check-login` runs just the login as an auth probe (it does NOT treat an authenticated landing on the
+  login-action route as an error). A profile can set `"login": true` instead of the flag.
 - **No-stall guarantee:** navigation uses `domcontentloaded` + a **bounded** networkidle settle, and the whole
   capture is wrapped so the **HAR always flushes and partial artifacts are written even on a timeout** — a hang
   becomes a `rejected` capture with a `nav_error` (exit 2), never a silent stall. `--channel chrome|msedge` falls

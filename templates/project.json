@@ -1,5 +1,5 @@
 {
-  "_help": "Machine config read by every script via --project. The AGENT bootstraps this itself with legacy-crawl-capture/scripts/init_project.py (derives most fields from the URL + login JSP + source tree) and completes the rest — you do not hand-fill it. This template is the shape/default reference. status.md §Project Config mirrors these values for humans. Field docs: SETUP.md §5. Worked example: examples/baa.project.json.",
+  "_help": "Machine config read by every script via --project. The AGENT bootstraps this itself with legacy-crawl-capture/scripts/init_project.py (derives most fields from the URL + login JSP + source tree) and completes the rest — you do not hand-fill it. This template is the shape/default reference. status.md §Project Config mirrors these values for humans. Field docs: SETUP.md §5. Worked example: examples/baa.project.json. credsFile (optional): path to a gitignored KEY=VALUE creds file for capture_screen --login, resolved relative to THIS file's directory; leave blank to auto-search for 'login.env' near this file, or use LEGACY_USER/LEGACY_PASS env vars. Never commit credentials.",
 
   "appName": "",
   "contextRoot": "/app",
@@ -9,6 +9,7 @@
   "loginAction": "",
   "loginUrl": "",
   "loginFields": { "user": "username", "password": "password" },
+  "credsFile": "",
 
   "families": "auto",
   "pathConventions": {},

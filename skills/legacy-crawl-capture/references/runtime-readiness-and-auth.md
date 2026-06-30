@@ -150,6 +150,13 @@ capture_screen.py --login --project work/project.json --creds login.env \
 `loginFields` → submit → land (warming the session) — then navigates the deep route in the **same** browser
 context, so the session is valid for the protected route. Use `--check-login` first to confirm auth alone.
 
+**Where the creds go (the simplest reliable setup):** put a **gitignored** `login.env` *next to your
+`project.json`* with `user=…` / `password=…` (keys are matched case-insensitively, and `username`/`userId`
+variants work). That's the first place the auto-search looks. If the creds must live elsewhere, set
+`"credsFile": "<relative-or-abs path>"` in project.json (resolved relative to project.json), pass `--creds
+<path>`, or export `LEGACY_USER`/`LEGACY_PASS`. **Never commit the creds file** — project.json stores only its
+path. (The login POST is also redacted from the saved HAR so no password lands in an artifact.)
+
 The canonical recovery this mirrors (provable with curl from one cookie jar — login page → POST login →
 reuse the new `JSESSIONID` → GET the dispatcher route returns the real screen):
 ```bash

@@ -219,6 +219,17 @@ def load_creds(path, anchors=None):
     return {}
 
 
+def cred_value(creds, primary, fallbacks):
+    """Case-insensitively pull a credential from the creds dict by the configured field name, then common
+    variants — so a login.env keyed USERNAME=/PASSWORD=/userId= still works without matching loginFields exactly."""
+    lower = {k.lower(): v for k, v in (creds or {}).items()}
+    for k in [primary] + fallbacks:
+        v = lower.get((k or "").lower())
+        if v:
+            return v
+    return None
+
+
 def login_url_for(proj):
     if proj.get("loginUrl"):
         return proj["loginUrl"]
@@ -233,11 +244,15 @@ def do_login(page, proj, creds, timeout, settle_ms):
     the proven flow: GET login page -> fill -> submit -> land."""
     fields = proj.get("loginFields") or {}
     uf, pf = fields.get("user", "username"), fields.get("password", "password")
-    user = creds.get(uf) or creds.get("user") or creds.get("LEGACY_USER") or os.environ.get("LEGACY_USER")
-    pw   = creds.get(pf) or creds.get("password") or creds.get("LEGACY_PASS") or os.environ.get("LEGACY_PASS")
+    user = cred_value(creds, uf, ["user", "username", "userid", "uid", "login"]) or os.environ.get("LEGACY_USER")
+    pw   = cred_value(creds, pf, ["password", "passwd", "pass", "pwd"]) or os.environ.get("LEGACY_PASS")
     if not user or not pw:
-        raise SystemExit("--login needs credentials: set %s/%s (or user/password, or LEGACY_USER/LEGACY_PASS) "
-                         "in --creds env file or the environment (do NOT commit them)." % (uf, pf))
+        raise SystemExit(
+            "--login: no credentials found. Provide them ONE of these ways (do NOT commit creds):\n"
+            "  - a gitignored creds file next to your project.json named login.env with lines:\n"
+            "        %s=...\n        %s=...\n"
+            "  - pass --creds <path/to/login.env>, or set \"credsFile\" in project.json to that path\n"
+            "  - or export LEGACY_USER / LEGACY_PASS in the environment" % (uf, pf))
     page.goto(login_url_for(proj), wait_until="domcontentloaded")
     settle(page, timeout, settle_ms)
     page.fill("input[name='%s']" % uf, user)
@@ -335,6 +350,13 @@ def main():
         (proj.get("legacySourceDir") or None),
         os.getcwd(),
     ] if d]
+    # creds path: --creds wins; else project.credsFile (resolved relative to project.json's dir); else load_creds
+    # defaults to searching for "login.env" near the project. LEGACY_USER/LEGACY_PASS env vars always work too.
+    creds_path = args.creds
+    if not creds_path and proj.get("credsFile"):
+        cf = proj["credsFile"]
+        pdir = os.path.dirname(os.path.abspath(args.project)) if args.project else os.getcwd()
+        creds_path = cf if os.path.isabs(cf) else os.path.join(pdir, cf)
     error_signatures = [s.lower() for s in (
         ["http status 5", "http status 4", "error 500", "error 404", "exception report",
          "stack trace", "page not found", "an error has occurred"]
@@ -410,11 +432,17 @@ def main():
         got = load_creds("login.env", [deep])
         assert got.get("user") == "alice" and got.get("password") == "topsecret", got
 
+        # 6. cred_value: case-insensitive + variant key lookup (a file keyed USERNAME=/PASSWORD= still resolves)
+        assert cred_value({"USERNAME": "bob", "PASSWORD": "x"}, "user", ["username"]) == "bob"
+        assert cred_value({"userId": "c"}, "user", ["userid"]) == "c"
+        assert cred_value({}, "user", ["username"]) is None
+
         out_base = os.path.join(args.out_dir, args.name) if (args.out_dir and args.name) else None
         print(json.dumps({"self_check": "ok", "viewport": vp, "out_base": out_base, "playwright_importable": ok,
                           "record_har": record_har, "error_signatures": len(error_signatures),
                           "checks": {"settle_swallows": True, "do_login_selectors": True, "creds_guard": True,
-                                     "har_redacted": True, "login_ok_landing": True, "creds_search": True},
+                                     "har_redacted": True, "login_ok_landing": True, "creds_search": True,
+                                     "cred_variants": True},
                           "resolved": {"url": url, "login": do_login_flag, "wait_for": wait_for,
                                        "must_contain": must_contain, "wait_for_gone": wait_for_gone, "wait_ms": wait_ms}}))
         return
@@ -424,7 +452,7 @@ def main():
             from playwright.sync_api import sync_playwright
         except Exception as e:
             raise SystemExit("Playwright not available (%s). pip install playwright && playwright install chromium" % e)
-        creds = load_creds(args.creds, cred_anchors)
+        creds = load_creds(creds_path, cred_anchors)
         final_url, title, still_login = "", "", True
         with sync_playwright() as p:
             browser = launch_browser(p, args.channel)
@@ -467,7 +495,7 @@ def main():
     elif isinstance(prof.get("workflow"), str):
         steps = json.load(open(prof["workflow"]))
     network, assets = [], []
-    creds = load_creds(args.creds, cred_anchors) if do_login_flag else {}
+    creds = load_creds(creds_path, cred_anchors) if do_login_flag else {}
 
     doc_status = {"code": None}  # status of the top-level navigation document (mutable holder)
     base = os.path.join(args.out_dir, args.name)   # re-pointed to _rejected/ after load if it's an error/partial page

@@ -86,6 +86,13 @@ Do this ONCE, then implement repeatedly. Order matters:
 - **Frontend** — build the view 1:1 **from `source-model.json` + theme tokens** (loops→`.map()`, `<html:*>`→inputs,
   message keys→exact labels; colors/fonts from `var(--color-NN)`). The screenshot only VERIFIES. Rebuild the login
   screen for real (its session authenticates data calls). See `react-replica-kit/references/jsp-to-react-mapping.md`.
+  **Build REAL React components — NEVER inject/replay the captured legacy HTML.** Do NOT `dangerouslySetInnerHTML`
+  the recorded contentlet fragments (or paste legacy markup): that is lift-and-shift, not modernization, and it
+  defeats the parity gate (injected legacy HTML trivially "matches" the legacy). The recorded AJAX responses are the
+  **DATA source** — extract the values (rows/cells/fields) into typed props and render them through React components
+  built from the source-model. Also build the **app shell** (the nav tabs + FA header + the contentlet panel
+  layout), not just the inner fragments. A view that ships legacy HTML, omits the chrome, or mislabels a panel is
+  NOT done — `verify_screen` (run it, don't skip) must show 0 critical DOM deltas against the legacy oracle first.
 - **Backend (FULL)** — `scaffold_backend.py` from `backend-model.json` (controller/service/gateway/DTO/OpenAPI),
   then fill: the result-set→DTO mapping, the **ServiceImpl business semantics** ported from the legacy service/builder
   (`[SVC:…]` — match legacy behavior before improving), and the session/entity/entitlement binding

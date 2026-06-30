@@ -6,6 +6,13 @@ and message keys. The captured `model.json` + `dom.html` are the VERIFICATION ta
 result to match). Port the rendered result, not the Dojo/jQuery framework — but get the structure from
 source, don't reconstruct it by eyeballing the screenshot. See `legacy-crawl-capture/references/jsp-source-extraction.md`.
 
+> **DO NOT inject the legacy HTML.** Never `dangerouslySetInnerHTML` (or paste) the recorded contentlet/AJAX HTML
+> fragments to "render" a screen. That is lift-and-shift, not modernization: the code stays legacy markup, it can't
+> be restyled or maintained, and it silently passes `verify_screen` because injected legacy HTML *is* the legacy
+> DOM. The recorded AJAX responses are the **DATA source** — extract the values (table rows/cells, fields, labels)
+> into typed props and render them through **real React components**. Also build the app **shell** (nav tabs, header,
+> the panel layout), not just the inner fragments. If a "React" view is really an HTML dump, it's rejected.
+
 ## Construct mapping
 
 | Legacy construct | Rendered as | React + TS equivalent | Notes |

@@ -73,6 +73,11 @@ labels; colors/fonts from `var(--color-NN)`). The screenshot only VERIFIES. Rebu
 session authenticates data calls). Data per the feature's mode: `record` (capture_fixtures.py → MSW replay of the REAL
 HAR) or `live` (Vite proxy to the legacy backend). No hand-authored data. See
 `react-replica-kit/references/jsp-to-react-mapping.md` and `backend-data-modes.md`.
+**Build REAL React components — NEVER inject/replay the captured legacy HTML** (`dangerouslySetInnerHTML` of the
+recorded fragments = lift-and-shift, not modernization, and it defeats the parity gate). The recorded responses are
+the **DATA** — extract the values into props and render them via React components built from the source-model. Build
+the **app shell** too (nav tabs + header + panel layout). A view that ships legacy HTML, omits the chrome, or
+mislabels a panel is NOT done — `verify_screen` (don't skip it) must show 0 critical DOM deltas vs the oracle first.
 
 ## Verification (mandatory before `verified` — evidence, not eye)
 Capture the React render with the SAME profile; `parity-verify/verify_screen.py --data-mode <record|live>` (0 critical

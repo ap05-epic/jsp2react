@@ -89,10 +89,10 @@ run this after any change and before any commit:
 ```bash
 cd skills
 for f in legacy-crawl-capture/scripts/{init_project,extract_jsp,crawl_ajax,crawl_screens,capture_screen,capture_fixtures} \
-         react-replica-kit/scripts/{extract_theme,build_index} \
+         react-replica-kit/scripts/{extract_theme,build_index,serve_review} \
          parity-verify/scripts/{dom_diff,verify_screen} \
          springboot-target-kit/scripts/{extract_backend,scaffold_backend,verify_contract}; do
-  python3 $f.py --self-check || echo "FAILED: $f"; done          # expect 13x {"self_check": "ok", ...}
+  python3 $f.py --self-check || echo "FAILED: $f"; done          # expect 14x {"self_check": "ok", ...}
 node parity-verify/scripts/pixel_diff.js --self-check            # expect identical_diff_pixels: 0
 ```
 

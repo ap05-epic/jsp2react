@@ -117,10 +117,10 @@ python3 $S/legacy-crawl-capture/scripts/init_project.py --url <legacy login URL>
 # 0b. sanity: every script answers --self-check without a browser
 for f in legacy-crawl-capture/scripts/init_project legacy-crawl-capture/scripts/extract_jsp legacy-crawl-capture/scripts/crawl_ajax \
          legacy-crawl-capture/scripts/crawl_screens legacy-crawl-capture/scripts/capture_screen legacy-crawl-capture/scripts/capture_fixtures \
-         react-replica-kit/scripts/extract_theme react-replica-kit/scripts/build_index \
+         react-replica-kit/scripts/extract_theme react-replica-kit/scripts/build_index react-replica-kit/scripts/serve_review \
          parity-verify/scripts/dom_diff parity-verify/scripts/verify_screen springboot-target-kit/scripts/extract_backend \
          springboot-target-kit/scripts/scaffold_backend springboot-target-kit/scripts/verify_contract ; do
-  python3 $S/$f.py --self-check ; done    # expect 13x "self_check: ok"
+  python3 $S/$f.py --self-check ; done    # expect 14x "self_check: ok"
 node $S/parity-verify/scripts/pixel_diff.js --self-check
 
 # 0c. ensure a browser is installed for capture (the kit drives Playwright)

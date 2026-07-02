@@ -11,7 +11,7 @@ Usage:
 Then open http://localhost:8800
 Stdlib only.
 """
-import argparse, json, glob, os, html, functools
+import argparse, json, glob, os, sys, html, functools
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 
@@ -34,6 +34,7 @@ def collect(work_dir):
             "pass": bool(g.get("pass")),
             "ratio": g.get("pixel_ratio"),
             "critical": g.get("critical_structural"),
+            "nesting": g.get("nesting_structural", 0),
             "data_mode": g.get("data_mode", "?"),
             "data_present": g.get("data_present", True),
             "sxs": f"{pref}parity/{name}.side-by-side.png",
@@ -57,7 +58,7 @@ def render(rows, react_base):
         <section style="margin:24px 0;border-top:1px solid #eee;padding-top:16px">
           <h2 style="font:600 16px sans-serif">{html.escape(r['name'])}
             <span style="color:{color}">{badge}</span>
-            <small style="color:#555;font-weight:400">· pixel {ratio} · critical {r['critical']} {datatag}</small>
+            <small style="color:#555;font-weight:400">· pixel {ratio} · critical {r['critical']} · nesting {r['nesting']} {datatag}</small>
             <a href="{r['report']}" style="font-size:12px;margin-left:8px">report.md</a>
           </h2>
           <p style="font:12px sans-serif;color:#777">legend: legacy | react | diff</p>
@@ -73,8 +74,29 @@ def render(rows, react_base):
     </body>"""
 
 
+def self_check():
+    """Exercise collect() + render() on a synthetic parity report — no port, no browser."""
+    import tempfile, shutil
+    d = tempfile.mkdtemp(prefix="j2r_review_")
+    try:
+        os.makedirs(os.path.join(d, "v1", "parity"))
+        json.dump({"name": "v1_default", "gate": {"pass": True, "pixel_ratio": 0.001,
+                   "critical_structural": 0, "nesting_structural": 3, "data_mode": "record",
+                   "data_present": True}},
+                  open(os.path.join(d, "v1", "parity", "v1_default.parity-report.json"), "w"))
+        rows = collect(d)
+        assert len(rows) == 1 and rows[0]["pass"] and rows[0]["nesting"] == 3, rows
+        page = render(rows, "")
+        assert "v1_default" in page and "PASS" in page and "nesting 3" in page, page[:300]
+        print(json.dumps({"self_check": "ok", "rows": 1, "render": "ok"}))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Serve a legacy-vs-React side-by-side review page.")
+    if "--self-check" in sys.argv:
+        return self_check()
     ap.add_argument("--work-dir", required=True, help="Evidence root (contains screenshots/ and parity/).")
     ap.add_argument("--react-base-url", default="", help="Running React dev server (optional live iframe).")
     ap.add_argument("--port", type=int, default=8800)

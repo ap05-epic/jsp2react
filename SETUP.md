@@ -46,9 +46,10 @@ modernize-flow/
 
 ## 2. What `install.sh <mode>` does
 
-A **clean install**: it removes this toolkit's managed skills + agents (and the retired v2 `jsp2react-analyzer`/
-`jsp2react-builder`) from the target dirs, then installs exactly the chosen mode's set — so the pod never runs
-stale files. It only touches files this toolkit owns (by name); your other `~/.copilot` skills/agents are safe.
+A **clean install**: it moves aside this toolkit's managed skills + agents (and the retired v2 `jsp2react-analyzer`/
+`jsp2react-builder`), then installs exactly the chosen mode's set — so the pod never runs stale files. It only
+touches files this toolkit owns (by **exact name**); your other `~/.copilot` skills/agents are safe, and anything
+it replaces is preserved under `~/.copilot/modernize-flow.backup/<timestamp>/` — never deleted.
 
 | Step | full | frontend |
 |---|---|---|

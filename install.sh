@@ -4,9 +4,10 @@
 #   bash install.sh full       # React + Spring Boot   (agent: modernize-flow ; 4 skills)   [default]
 #   bash install.sh frontend   # React only (fallback) (agent: jsp2react      ; 3 skills)
 #
-# CLEAN install: it first REMOVES this toolkit's managed skills + agents (and the retired v2 agents) from the
-# target dirs, then installs exactly the set for the chosen mode — so the pod is never left running stale files.
-# It only ever touches files THIS toolkit owns (by name); your other ~/.copilot skills/agents are untouched.
+# CLEAN install: it first MOVES ASIDE (backs up) this toolkit's managed skills + agents (and the retired v2
+# agents), then installs exactly the set for the chosen mode — so the pod is never left running stale files.
+# It only ever touches files THIS toolkit owns (by exact name); your other skills/agents are untouched, and
+# anything it replaces is preserved under <skills-parent>/modernize-flow.backup/<timestamp>/ — never deleted.
 #
 # Override targets if your pod differs:  COPILOT_SKILLS_DIR=… COPILOT_AGENTS_DIR=… bash install.sh <mode>
 # (Once DigitCode packaging is ready, `dc agent install modernize-flow` replaces this script.)
@@ -40,12 +41,20 @@ echo "   skills -> $SKILLS_DST"
 echo "   agents -> $AGENTS_DST"
 mkdir -p "$SKILLS_DST" "$AGENTS_DST"
 
-echo ">> purging this toolkit's managed skills + agents (clean install)"
+echo ">> moving aside this toolkit's managed skills + agents (clean install — previous copies are backed up)"
+BACKUP_DIR=""   # created lazily, only if something actually needs moving
+backup() {      # move a same-named file/dir aside instead of deleting — nothing is ever destroyed
+  if [ -z "$BACKUP_DIR" ]; then
+    BACKUP_DIR="$(dirname "$SKILLS_DST")/modernize-flow.backup/$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$BACKUP_DIR"
+  fi
+  mv "$1" "$BACKUP_DIR/" && echo "   moved aside  $(basename "$1")  ->  $BACKUP_DIR/"
+}
 for s in $ALL_SKILLS; do
-  if [ -d "$SKILLS_DST/$s" ]; then rm -rf "${SKILLS_DST:?}/$s" && echo "   removed skill  $s"; fi
+  [ -d "$SKILLS_DST/$s" ] && backup "$SKILLS_DST/$s"
 done
 for a in $ALL_AGENTS $RETIRED_AGENTS; do
-  if [ -f "$AGENTS_DST/$a" ]; then rm -f "$AGENTS_DST/$a" && echo "   removed agent  $a"; fi
+  [ -f "$AGENTS_DST/$a" ] && backup "$AGENTS_DST/$a"
 done
 
 echo ">> installing the $MODE set"
@@ -93,6 +102,7 @@ if [ "$MODE" = "full" ]; then
 fi
 
 echo ""
+[ -n "$BACKUP_DIR" ] && echo "   note: replaced copies were preserved in $BACKUP_DIR (delete when happy)"
 echo "DONE ($MODE). Verify the engines, then start the agent:"
 echo "  node   $SKILLS_DST/parity-verify/scripts/pixel_diff.js --self-check         # expect identical_diff_pixels: 0"
 echo "  python $SKILLS_DST/legacy-crawl-capture/scripts/extract_jsp.py --self-check  # JSP source parser"

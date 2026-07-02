@@ -112,10 +112,11 @@ Nothing magic — it's a **file copier with safety checks**. GitHub Copilot disc
 `~/.copilot/skills/` and agents in `~/.copilot/agents/`; this repo is just the source of those files.
 Running `bash install.sh full` (or `frontend`):
 
-1. **Removes the old copies** of this toolkit's own skills + agents from `~/.copilot` — only files this
-   toolkit owns, matched by name; your other skills and agents are never touched. This is why it's called
-   a *clean install*: after every `git pull`, re-running it guarantees the pod runs the new files, never
-   a stale mix of old and new.
+1. **Moves aside the old copies** of this toolkit's own skills + agents — only files this toolkit owns,
+   matched by exact name; your other skills and agents are never touched, and anything replaced is backed
+   up under `~/.copilot/modernize-flow.backup/<timestamp>/`, never deleted. This is why it's called a
+   *clean install*: after every `git pull`, re-running it guarantees the pod runs the new files, never a
+   stale mix of old and new.
 2. **Copies in the chosen mode's set** — `full`: 4 skills + the `modernize-flow` agent; `frontend`:
    3 skills + the `jsp2react` agent (no Spring Boot kit). Omitting the mode means `full`.
 3. **Installs the two pixel-diff packages** (`npm install` inside the `parity-verify` skill).

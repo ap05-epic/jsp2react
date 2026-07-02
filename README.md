@@ -32,9 +32,10 @@ git clone <this repo's URL>
 cd modernize-flow
 bash install.sh full        # or: bash install.sh frontend
 ```
-`install.sh` does a **clean install**: it purges this toolkit's managed skills/agents (and the retired v2 agents)
-from `~/.copilot`, then installs exactly the chosen mode's set — so the pod is never on stale files. It only
-touches files this toolkit owns; the update routine is just `git pull && bash install.sh full`. (Plain‑English
+`install.sh` does a **clean install**: it moves aside this toolkit's own managed skills/agents (backed up under
+`~/.copilot/modernize-flow.backup/<timestamp>/`, never deleted), then installs exactly the chosen mode's set — so
+the pod is never on stale files. It only touches files this toolkit owns **by exact name**; every other skill and
+agent is untouched. The update routine is just `git pull && bash install.sh full`. (Plain‑English
 walk‑through: [HOW‑IT‑WORKS § What `bash install.sh` actually does](docs/HOW-IT-WORKS.md#what-bash-installsh-actually-does).) Then in Copilot, run the **`modernize-flow`** (or **`jsp2react`**) agent and give
 it the **legacy URL + how to log in + a `project.json`** — it bootstraps `status.md` itself and works one
 control/slice at a time (exact prompts in [docs/PROMPTS.md](docs/PROMPTS.md)). Prereqs the installer checks: Node.js,

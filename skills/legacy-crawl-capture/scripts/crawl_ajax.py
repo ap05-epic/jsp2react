@@ -21,11 +21,17 @@ Crawljax (optional, OSS) can be run separately for exhaustive state-graph discov
 output to the same shape and fold it in with --merge (see references/ajax-crawl-and-viewgraph.md).
 
 Usage:
-  python crawl_ajax.py --start-url <url> --auth-state auth_state.json --out viewgraph.json
+  python crawl_ajax.py --start-url <url> --login --creds login.env --project project.json --out viewgraph.json
+  python crawl_ajax.py --start-url <url> --auth-state auth_state.json --out viewgraph.json   # simple apps only
   python crawl_ajax.py --start-url <url> --merge crawljax.viewgraph.json --out viewgraph.json
   python crawl_ajax.py --self-check
+
+Auth: for session-sensitive apps use --login (a FRESH from-start login in the crawl context — same proven
+machinery as capture_screen.py; a saved --auth-state is often a stale single cookie the server rotates,
+which lands every view on the app's error page).
 """
 import argparse, json, os, hashlib
+import capture_screen as cap   # shared, pod-proven login/browser machinery (same skill dir)
 
 CANDIDATES_JS = r"""
 () => {
@@ -144,7 +150,13 @@ def reconcile(*lists):
 def main():
     ap = argparse.ArgumentParser(description="Discover AJAX views via from-the-start click-path BFS -> viewgraph.json")
     ap.add_argument("--start-url", help="The authenticated start view (e.g. the post-login summary). Required for crawl.")
-    ap.add_argument("--auth-state", help="Playwright storage_state json (reuse the saved session).")
+    ap.add_argument("--auth-state", help="Playwright storage_state json (saved session) — simple apps only; "
+                                         "session-sensitive apps need --login (a saved single cookie goes stale).")
+    ap.add_argument("--login", action="store_true",
+                    help="FRESH from-start login in the crawl context before crawling (loginUrl/loginFields from "
+                         "--project; creds from --creds / project.credsFile / LEGACY_USER+LEGACY_PASS).")
+    ap.add_argument("--creds", help="KEY=VALUE creds file for --login (default: project.credsFile or a nearby login.env).")
+    ap.add_argument("--channel", help="Browser channel, e.g. chrome|msedge (default: bundled chromium, then chrome, then msedge).")
     ap.add_argument("--out", help="Write viewgraph.json here. Required for a real run.")
     ap.add_argument("--viewport", default="1920x1080")
     ap.add_argument("--max-states", type=int, default=40, help="Stop after discovering this many distinct views.")
@@ -179,12 +191,18 @@ def main():
         assert len(s1["clickPathFromStart"]) == 1, "shortest path not kept"
         assert looks_like_error({"title": "HTTP Status 500", "url": "/e", "bodyLen": 99}), "error miss"
         assert not looks_like_error({"title": "FA Profile", "url": "/ok", "bodyLen": 500}), "false error"
-        print(json.dumps({"self_check": "ok", "playwright_importable": pw, "reconciled": len(merged)}))
+        # --login wiring: the shared capture_screen machinery must be importable and resolve cred variants
+        assert cap.cred_value({"USERNAME": "u"}, "user", ["username"]) == "u", "shared login machinery broken"
+        assert cap.login_ok("FA Search", "http://h/APP/loginAction.do", False, ["loginaction.do"], "loginaction.do"), \
+            "login_ok should accept an authenticated landing on the login-action route"
+        print(json.dumps({"self_check": "ok", "playwright_importable": pw, "reconciled": len(merged),
+                          "login_machinery": "shared-with-capture_screen"}))
         return
 
     if not args.start_url or not args.out:
         raise SystemExit("--start-url and --out are required (or use --self-check)")
-    EXTRA_MARKERS[:] = project_error_markers(load_project(args.project))   # app login route + errorSignatures
+    proj = load_project(args.project)
+    EXTRA_MARKERS[:] = project_error_markers(proj)   # app login route + errorSignatures
     try:
         from playwright.sync_api import sync_playwright
     except Exception as e:
@@ -211,7 +229,9 @@ def main():
             page.click(sel, timeout=args.readiness_timeout)
 
     def reach(page, path):
-        page.goto(args.start_url, wait_until="domcontentloaded")   # settle() does the bounded networkidle wait
+        # wait_until="commit" (not domcontentloaded): slow legacy pages can block past the nav timeout before
+        # DOMContentLoaded fires — the exact capture_screen stall. settle() supplies the bounded wait after.
+        page.goto(args.start_url, wait_until="commit")
         settle(page)
         for step in path:
             do_action(page, step)
@@ -235,12 +255,29 @@ def main():
         return sorted(set(hits))
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = cap.launch_browser(p, args.channel)   # bundled chromium -> chrome -> msedge fallback
         ctx_kwargs = {"viewport": {"width": w, "height": h}, "device_scale_factor": 1}
         if args.auth_state:
             ctx_kwargs["storage_state"] = args.auth_state
         ctx = browser.new_context(**ctx_kwargs)
         page = ctx.new_page()
+
+        if args.login:
+            # creds resolution mirrors capture_screen: --creds wins; else project.credsFile (relative to
+            # project.json's dir); else load_creds searches for login.env near the anchors. Env vars work too.
+            creds_path = args.creds
+            pdir = os.path.dirname(os.path.abspath(args.project)) if args.project else os.getcwd()
+            if not creds_path and proj.get("credsFile"):
+                cf = proj["credsFile"]
+                creds_path = cf if os.path.isabs(cf) else os.path.join(pdir, cf)
+            anchors = [d for d in [pdir, proj.get("legacySourceDir"), os.getcwd()] if d]
+            cap.do_login(page, proj, cap.load_creds(creds_path, anchors), args.readiness_timeout, args.settle_ms)
+            still_login = page.locator("input[type=password]").count() > 0
+            lb = (proj.get("loginAction") or "").rstrip("/").split("/")[-1].lower()
+            if not cap.login_ok(page.title(), page.url, still_login, list(ERROR_MARKERS) + EXTRA_MARKERS, lb):
+                ctx.close(); browser.close()
+                raise SystemExit("--login did not authenticate (still on the login/error page). Check the creds "
+                                 "file + project.json loginFields; probe with capture_screen.py --check-login.")
 
         reach(page, [])
         snap0 = snapshot(page)

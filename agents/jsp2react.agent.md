@@ -55,6 +55,8 @@ READ status.md
 3. **Theme**: `extract_theme.py` → `evidence/theme/{tokens.json,theme.css}`.
 4. **Discover every view**: `crawl_screens.py --emit-viewgraph` + `crawl_ajax.py --merge` → `viewgraph.json`
    (AJAX views from the START; never open deep links directly; each view carries its from-start click-path).
+   Session-sensitive apps: crawl with **`--login --creds --project`** (fresh from-start login, same as capture) —
+   a saved `--auth-state` cookie goes stale there and every discovered view lands on the app's error page.
 5. **Per view**: `extract_jsp.py` → `<view>/source-model.json` (the build input).
 6. **Capture + REAL responses**: capture profile, `capture_screen.py --profile --record-har`. For
    session-sensitive / AJAX screens use **`--login --project --creds`** (fresh from-start login; a saved

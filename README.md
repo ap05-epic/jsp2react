@@ -11,6 +11,10 @@ procedure)** and generates a **Spring Boot** endpoint (controller → service �
 It is **generic** (any legacy app via `project.json`) and **source‑driven** — the build input is the
 JSP/AJAX/CSS/Java source; the running screen is the verification target (not a screenshot the AI guesses from).
 
+**The docs, in reading order:** [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) — the whole system in plain
+English (start here; use it to explain it to others) · [SETUP.md](SETUP.md) — install, first run, and the
+exact Copilot prompts · [docs/REFERENCE.md](docs/REFERENCE.md) — every script on one page (the maintainer's map).
+
 ## Two modes (pick at install time)
 
 | Mode | Agent | Target | Skills installed |
@@ -23,13 +27,14 @@ The frontend mode is the safe retreat if the full‑stack path gets too complex 
 ## Quick start (manual phase)
 
 ```bash
-git clone https://github.com/ap05-epic/jsp2react.git
+git clone https://github.com/ap05-epic/jsp2react.git   # or your internal GitLab copy of this repo
 cd jsp2react
 bash install.sh full        # or: bash install.sh frontend
 ```
 `install.sh` does a **clean install**: it purges this toolkit's managed skills/agents (and the retired v2 agents)
 from `~/.copilot`, then installs exactly the chosen mode's set — so the pod is never on stale files. It only
-touches files this toolkit owns. Then in Copilot, run the **`modernize-flow`** (or **`jsp2react`**) agent and give
+touches files this toolkit owns; the update routine is just `git pull && bash install.sh full`. (Plain‑English
+walk‑through: [HOW‑IT‑WORKS § What `bash install.sh` actually does](docs/HOW-IT-WORKS.md#what-bash-installsh-actually-does).) Then in Copilot, run the **`modernize-flow`** (or **`jsp2react`**) agent and give
 it the **legacy URL + how to log in + a `project.json`** — it bootstraps `status.md` itself and works one
 control/slice at a time (exact prompts in [SETUP.md §6b](SETUP.md)). Prereqs the installer checks: Node.js,
 Python 3 + Playwright (full mode also checks for a JDK + Maven/Gradle).
@@ -83,6 +88,7 @@ jsp2react/
 ├── README.md            ← you are here
 ├── SETUP.md             ← detailed stand-up + the Copilot prompts (read this next)
 ├── docs/HOW-IT-WORKS.md ← plain-English explainer (use this to understand it / show colleagues)
+├── docs/REFERENCE.md    ← every script on one page (the maintainer's map)
 ├── agents/              ← modernize-flow.agent.md (full) · jsp2react.agent.md (frontend fallback)
 ├── skills/              ← legacy-crawl-capture · react-replica-kit · parity-verify · springboot-target-kit
 ├── templates/           ← status.md · spec.md · MANIFEST.json · capture-profile.json · project.json

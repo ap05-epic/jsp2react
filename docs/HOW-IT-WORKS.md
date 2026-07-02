@@ -104,6 +104,26 @@ The login screen is rebuilt for real, so its session is what authorizes every da
   every view with its status (and, full mode, its backend‑contract result) for a human to glance at.
 - **Reusable:** one `project.json` makes it work on any legacy JSP/Struts app, not just one.
 
+## What `bash install.sh` actually does
+
+Nothing magic — it's a **file copier with safety checks**. GitHub Copilot discovers skills in
+`~/.copilot/skills/` and agents in `~/.copilot/agents/`; this repo is just the source of those files.
+Running `bash install.sh full` (or `frontend`):
+
+1. **Removes the old copies** of this toolkit's own skills + agents from `~/.copilot` — only files this
+   toolkit owns, matched by name; your other skills and agents are never touched. This is why it's called
+   a *clean install*: after every `git pull`, re-running it guarantees the pod runs the new files, never
+   a stale mix of old and new.
+2. **Copies in the chosen mode's set** — `full`: 4 skills + the `modernize-flow` agent; `frontend`:
+   3 skills + the `jsp2react` agent (no Spring Boot kit). Omitting the mode means `full`.
+3. **Installs the two pixel-diff packages** (`npm install` inside the `parity-verify` skill).
+4. **Checks prerequisites** and prints exactly what's missing and how to get it (Node, Python +
+   Playwright + a *launchable* browser; full mode also a JDK + Maven/Gradle). Checks only — it never
+   installs anything system-wide itself.
+
+It's safe to run repeatedly, and running the other mode cleanly switches modes. The whole update
+routine is two commands: `git pull && bash install.sh full`.
+
 ## What you actually run
 
 Install once, choosing a mode (`bash install.sh full` or `frontend`), then tell Copilot to run the

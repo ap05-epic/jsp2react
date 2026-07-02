@@ -24,8 +24,9 @@ It is **source-driven**: the driver agent builds from parsed JSP source, not fro
 ## Prerequisites (reused pod skills — do not reinvent)
 
 - **Login** → produce `auth_state.json` once via `webapp-snapshot/scripts/save_auth_state.py`
-  (or creds-form / env-bypass / token-query per that skill's `SSO_AUTH_GUIDE.md`). All capture
-  commands reuse it with `--auth-state auth_state.json`.
+  (or creds-form / env-bypass / token-query per that skill's `SSO_AUTH_GUIDE.md`). Simple screens reuse
+  it with `--auth-state auth_state.json`; **session-sensitive apps use `--login` instead** (both
+  `capture_screen.py` and `crawl_ajax.py` support it — a saved single cookie goes stale).
 - **Playwright** is available because `webapp-testing` uses it. If a launch fails, see webapp-testing.
 - **Two capture tools, different jobs — keep them separate:**
   `snapshot_single.py` (webapp-snapshot) = a **quick visual check** while debugging.
@@ -55,13 +56,16 @@ the React structure FROM this; the screenshot only verifies. See `references/jsp
 
 ### crawl_ajax.py — discover AJAX views from the START → `viewgraph.json`
 ```bash
-python scripts/crawl_ajax.py --start-url <post-login summary> --auth-state auth_state.json \
+python scripts/crawl_ajax.py --start-url <post-login summary> --login --creds login.env --project project.json \
   --merge static-viewgraph.json --out viewgraph.json --max-states 40 --max-depth 3
 ```
 Stateful Playwright crawl: clicks/hovers every interactive element from the start, follows AJAX, and
 records each view with its **full from-start click-path** + triggered endpoint. Solves "one link = 30
 views" and enforces "never open a deep link directly." Reconciles static + (optional Crawljax) states.
-See `references/ajax-crawl-and-viewgraph.md`.
+**Auth: session-sensitive apps need `--login`** (fresh from-start login in the crawl context — the same
+proven machinery + creds resolution as `capture_screen.py`); a saved `--auth-state` is a stale single
+cookie there and every crawled view lands on the app's error page. `--channel chrome|msedge` falls back
+to a system browser. See `references/ajax-crawl-and-viewgraph.md`.
 
 ### crawl_screens.py — enumerate every screen (deterministic-first)
 ```bash
@@ -113,7 +117,7 @@ asset failed** — a `usable:false` PNG is not admissible parity evidence.
   be gitignored — never commit it; project.json stores only its path.** The login POST is **redacted from the saved
   HAR**. `--check-login` runs just the login as an auth probe (it does NOT treat an authenticated landing on the
   login-action route as an error). A profile can set `"login": true` instead of the flag.
-- **No-stall guarantee:** navigation uses `domcontentloaded` + a **bounded** networkidle settle, and the whole
+- **No-stall guarantee:** navigation uses `wait_until="commit"` + a **bounded** networkidle settle, and the whole
   capture is wrapped so the **HAR always flushes and partial artifacts are written even on a timeout** — a hang
   becomes a `rejected` capture with a `nav_error` (exit 2), never a silent stall. `--channel chrome|msedge` falls
   back to a system browser when bundled Chromium isn't installed (`python -m playwright install chromium`).

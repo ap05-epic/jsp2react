@@ -18,7 +18,7 @@ jsp2react/
 ├── install.sh                    # clean install, MODE = full | frontend
 ├── README.md
 ├── SETUP.md
-├── docs/HOW-IT-WORKS.md
+├── docs/{HOW-IT-WORKS.md, REFERENCE.md}   # plain-English explainer · per-script map
 ├── agents/
 │   ├── modernize-flow.agent.md   # FULL: React + Spring Boot
 │   └── jsp2react.agent.md        # FRONTEND fallback: React only
@@ -137,7 +137,9 @@ python3 $S/react-replica-kit/scripts/extract_theme.py --css-dir <webapp>/theme -
 python3 $S/legacy-crawl-capture/scripts/crawl_screens.py --struts-config <…>/struts-config.xml \
   --webapp-dir <webapp> --project $P --out work/screens.json --emit-viewgraph work/static-viewgraph.json
 python3 $S/legacy-crawl-capture/scripts/crawl_ajax.py --start-url <post-login start> --project $P \
-  --auth-state work/auth_state.json --merge work/static-viewgraph.json --out work/evidence/viewgraph.json
+  --login --creds login.env --merge work/static-viewgraph.json --out work/evidence/viewgraph.json
+#   (--login = fresh from-start login, same as capture. Only simple non-session-sensitive apps can swap it
+#    for --auth-state work/auth_state.json — a saved single cookie goes stale and lands on the error page.)
 
 # 4. PARSE one flow's JSP -> source-model.json (UI build input)
 python3 $S/legacy-crawl-capture/scripts/extract_jsp.py --jsp <webapp>/jsp/<flow>.jsp \

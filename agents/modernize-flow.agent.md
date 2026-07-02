@@ -64,6 +64,8 @@ Do this ONCE, then implement repeatedly. Order matters:
 3. **Theme**: `extract_theme.py` → `evidence/theme/{tokens.json,theme.css}` (colors/fonts from source).
 4. **Discover every view**: `crawl_screens.py --emit-viewgraph` (static) + `crawl_ajax.py --merge` (AJAX, from the
    START — never open deep links directly) → `viewgraph.json`. Each view carries its full from-start click-path.
+   Session-sensitive apps: crawl with **`--login --creds --project`** (fresh from-start login, same as capture) —
+   a saved `--auth-state` cookie goes stale there and every discovered view lands on the app's error page.
 5. **Per flow, parse the source**: `extract_jsp.py` → `<view>/source-model.json` (the UI build input); and
    `extract_backend.py` → `<flow>/backend-model.json` (the SP contract — name, typed params, result columns,
    session/request inputs).

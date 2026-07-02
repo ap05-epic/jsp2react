@@ -17,10 +17,13 @@ python scripts/crawl_screens.py --struts-config <…> --webapp-dir <…> \
 
 **2. Stateful AJAX crawl** — `crawl_ajax.py` (Playwright), the view explosion, from the start:
 ```bash
-python scripts/crawl_ajax.py --start-url <post-login summary> --auth-state auth_state.json \
+python scripts/crawl_ajax.py --start-url <post-login summary> --login --creds login.env --project project.json \
   --merge static-viewgraph.json --out viewgraph.json \
   --max-states 40 --max-depth 3 --max-actions 25 --settle-ms 1500
 ```
+`--login` does a fresh from-start login in the crawl context (same machinery as `capture_screen.py`) —
+required for session-sensitive apps, where a saved `--auth-state` single cookie goes stale/rotates and
+every crawled view then lands on the app's error page.
 It BFS-walks UI states: from each state it re-navigates to the start, replays the parent click-path, then
 probes each interactive element (link/button/tab/menuitem/hover-menu). A new DOM signature = a new view,
 recorded with its **full from-start click-path** + the endpoint it triggered. Error-looking views are

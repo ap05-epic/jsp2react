@@ -280,7 +280,7 @@ def login_ok(title, final_url, still_login, error_signatures, login_basename):
 
 def redact_har(har_path, login_basename):
     """Strip credentials from the saved HAR: the login POST body + cookie/auth headers on the login request.
-    The repo is public and HAR embeds request bodies — the password must never land in an artifact."""
+    A HAR embeds request bodies and gets committed/shared as evidence — the password must never land in an artifact."""
     if not login_basename or not os.path.exists(har_path):
         return
     try:
@@ -408,7 +408,7 @@ def main():
             pass
         assert login_url_for({"legacyBaseUrl": "http://h:8080", "contextRoot": "/APP"}).endswith("/APP/jsp/login.jsp")
 
-        # 3. redact_har strips the login POST password + cookie/auth headers (public repo: no creds in artifacts)
+        # 3. redact_har strips the login POST password + cookie/auth headers (no creds in shared artifacts)
         import tempfile
         hp = os.path.join(tempfile.mkdtemp(prefix="cap_sc_"), "t.har")
         json.dump({"log": {"entries": [

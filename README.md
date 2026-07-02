@@ -28,8 +28,8 @@ The frontend mode is the safe retreat if the full‑stack path gets too complex 
 ## Quick start (manual phase)
 
 ```bash
-git clone https://github.com/ap05-epic/jsp2react.git   # or your internal GitLab copy of this repo
-cd jsp2react
+git clone <this repo's URL>
+cd modernize-flow
 bash install.sh full        # or: bash install.sh frontend
 ```
 `install.sh` does a **clean install**: it purges this toolkit's managed skills/agents (and the retired v2 agents)
@@ -40,26 +40,23 @@ it the **legacy URL + how to log in + a `project.json`** — it bootstraps `stat
 control/slice at a time (exact prompts in [docs/PROMPTS.md](docs/PROMPTS.md)). Prereqs the installer checks: Node.js,
 Python 3 + Playwright (full mode also checks for a JDK + Maven/Gradle).
 
-**Revert:** the v2 frontend‑only system is tagged `v2.0-frontend-only` (and branch `v2-backup`) — restore with
-`git reset --hard v2.0-frontend-only`, or just run `install.sh frontend` for the functional fallback.
+**Fallback:** if the full‑stack path is too much for a given app, `bash install.sh frontend` switches to the
+frontend‑only system (same UI engine, no backend generation) — no re‑clone needed.
 
 ## How it works (one driver agent + four skills + one contract)
 
 ```
-                 ┌───────────────── status.md (control plane) · spec.md (contract) · MANIFEST.json (ledger) ─────────────────┐
-                 └───────────────────────────────▲──────────────────────────────────────────▲────────────────────────────────┘
-                                                  │ seeds (analysis mode)                     │ reads/updates (implementation mode)
-                       ┌──────────────────────────┴───────────────────────────────────────────┴──────────────────────────┐
-                       │   DRIVER AGENT   (modernize-flow = full · jsp2react = frontend)                                  │
-                       │   analysis: discover + parse + capture →  implementation: build 1:1 FROM SOURCE → prove → fix    │
-                       └───────┬───────────────────┬────────────────────────┬──────────────────────────┬──────────────────┘
-                               │ uses              │ uses                   │ uses                     │ uses (FULL only)
-                   ┌───────────┴────────┐ ┌────────┴─────────┐ ┌────────────┴──────────┐ ┌────────────┴───────────────┐
-                   │ legacy-crawl-capture│ │ react-replica-kit│ │ parity-verify         │ │ springboot-target-kit       │
-                   │ parse JSP · discover│ │ theme · scaffold ·│ │ pixel+DOM+data-presence│ │ trace action→service→DAO→SP │
-                   │ AJAX · capture+HAR  │ │ build view · index│ │ + contract gate        │ │ scaffold Spring Boot · verify│
-                   └─────────────────────┘ └───────────────────┘ └────────────────────────┘ └─────────────────────────────┘
-        reuses pod skills: webapp-snapshot (login/screenshots) · webapp-testing (Playwright/server) · digimem
+status.md (control plane) · spec.md (contract) · MANIFEST.json (evidence ledger)
+   ^ seeded in analysis mode · read + updated every implementation turn
+   |
+DRIVER AGENT — modernize-flow (full) · jsp2react (frontend-only fallback)
+   | analysis: discover + parse + capture, then implement: build FROM SOURCE -> prove -> fix
+   |
+   +- legacy-crawl-capture    parse JSP · find AJAX views · capture evidence + real HAR
+   +- react-replica-kit       theme · scaffold · build views · review index
+   +- parity-verify           DOM-content + pixel + data-presence gate
+   +- springboot-target-kit   action -> service -> DAO -> stored proc · verify  (FULL)
+      (reuses pod skills: webapp-snapshot · webapp-testing · digimem)
 ```
 
 **The loop (per control/slice, status‑driven so it never drifts over a long sweep):**
@@ -84,16 +81,16 @@ concrete delta → mark verified → regenerate INDEX.html.`
 ## What's here
 
 ```
-jsp2react/
+modernize-flow/
 ├── install.sh           ← clean install, MODE = full | frontend  (manual phase)
 ├── README.md            ← you are here
 ├── SETUP.md             ← detailed stand-up + the Copilot prompts (read this next)
-├── docs/HOW-IT-WORKS.md ← plain-English explainer (use this to understand it / show colleagues)
+├── docs/HOW-IT-WORKS.md ← plain-English explainer
 ├── docs/PROMPTS.md      ← copy-paste Copilot prompts (lifecycle, scenarios, anti-patterns)
 ├── docs/REFERENCE.md    ← every script on one page (the maintainer's map)
-├── agents/              ← modernize-flow.agent.md (full) · jsp2react.agent.md (frontend fallback)
-├── skills/              ← legacy-crawl-capture · react-replica-kit · parity-verify · springboot-target-kit
-├── templates/           ← status.md · spec.md · MANIFEST.json · capture-profile.json · project.json
+├── agents/              ← modernize-flow.agent.md (full) · jsp2react.agent.md (fallback)
+├── skills/              ← the four skills (each: SKILL.md + scripts/ + references/)
+├── templates/           ← the blueprint files the agent copies and fills itself
 └── examples/            ← baa.project.json (a worked project config)
 ```
 

@@ -27,7 +27,7 @@ Copy-paste prompts for driving this system, field-tested on a real legacy app. P
 
 ### A — Sanity check (right after `bash install.sh <mode>`; no crawling yet)
 
-> "Read jsp2react/SETUP.md and README.md. Confirm the skills are under ~/.copilot/skills and the
+> "Read the toolkit repo's SETUP.md and README.md. Confirm the skills are under ~/.copilot/skills and the
 > **<modernize-flow | jsp2react>** agent is discoverable, then run every script's `--self-check`
 > (the loop in SETUP.md §6 step 0b) and report the results. Don't crawl or capture anything yet."
 

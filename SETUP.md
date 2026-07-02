@@ -4,8 +4,8 @@ Fastest path: clone the repo and run **one command**, choosing a mode. The rest 
 that does and how to run your first flow. Later, DigitCode (`dc agent install modernize-flow`) replaces it.
 
 ```bash
-git clone https://github.com/ap05-epic/jsp2react.git
-cd jsp2react
+git clone <this repo's URL>
+cd modernize-flow
 bash install.sh full        # React + Spring Boot   (agent: modernize-flow)
 # or
 bash install.sh frontend    # React only — fallback (agent: jsp2react)
@@ -14,7 +14,7 @@ bash install.sh frontend    # React only — fallback (agent: jsp2react)
 ## 1. File tree
 
 ```
-jsp2react/
+modernize-flow/
 ├── install.sh                    # clean install, MODE = full | frontend
 ├── README.md
 ├── SETUP.md
@@ -60,8 +60,8 @@ stale files. It only touches files this toolkit owns (by name); your other `~/.c
 Override targets: `COPILOT_SKILLS_DIR=… COPILOT_AGENTS_DIR=… bash install.sh <mode>`. Templates are blueprints
 the driver agent copies and fills itself — you don't edit them by hand (§5).
 
-> **Revert / fallback:** v2 (frontend‑only) is tagged `v2.0-frontend-only` + branch `v2-backup`. Restore with
-> `git reset --hard v2.0-frontend-only`, or just `bash install.sh frontend` for the functional fallback.
+> **Fallback:** if full‑stack is too much for a given app, `bash install.sh frontend` cleanly switches to the
+> frontend‑only system (React only, no backend generation) — and `bash install.sh full` switches back.
 
 ## 3. Prerequisites already on the pod (verify, don't install)
 
